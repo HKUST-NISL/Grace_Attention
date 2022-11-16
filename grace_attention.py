@@ -1,5 +1,7 @@
 import argparse
 import sys
+import threading
+
 import rospy
 import std_msgs.msg
 import hr_msgs.msg
@@ -11,15 +13,16 @@ class GraceAttention:
 	node_name = "grace_attention_node"
 
 	hr_perception_topic = "/hr/perception/people"
-	topic_queue_size = 1000
+	topic_queue_size = 100
 
-	dynamic_reconfig_request_timeout = 1
+	dynamic_reconfig_request_timeout = 0.1
 
 	hr_CAM_cfg_server = "/hr/perception/camera_angle"
 	grace_chest_cam_motor_angle = 0.7
 
 	hr_ATTN_cfg_server = "/hr/behavior/attention"
 	hr_ATTN_patient_id = "patient"
+	hr_ATTN_reconfig_interval = 0.25
 	hr_ATTN_timeout = 1.0
 
 	def __init__(self):
@@ -28,25 +31,20 @@ class GraceAttention:
 		self.hr_people_pub = rospy.Publisher(self.hr_perception_topic, hr_msgs.msg.People, queue_size=self.topic_queue_size)
 		self.dynamic_CAM_cfg_client = dynamic_reconfigure.client.Client(self.hr_CAM_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.configureGraceCAMCallback)
 		self.dynamic_ATTN_cfg_client = dynamic_reconfigure.client.Client(self.hr_ATTN_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.configureGraceATTNCallback)
-		self.initChestCam()
-		rospy.spin()
-
-	def peoplePerceptionCallback(self,hr_people_msg):
-		persons_detected = hr_people_msg.people
-		self.lookAtOneTarget(persons_detected)
 
 	def initChestCam(self):
 		#tilt chest cam to a pre-defined angle
 		self.dynamic_CAM_cfg_client.update_configuration({"motor_angle":self.grace_chest_cam_motor_angle})
 	
 	def configureGraceCAMCallback(self,config):
-		rospy.loginfo("Config set to {motor_angle}".format(**config))
+		# # hr sdk seems to be repeatedly throwing back this response
+		# rospy.loginfo("Config set to {motor_angle}".format(**config))
 		pass
 
-
-	def lookAtOneTarget(self, persons_detected):
+	def peoplePerceptionCallback(self,hr_people_msg):
+		persons_detected = hr_people_msg.people
+		#Decide attention target based on perception input
 		self.decideCurrentTarget(persons_detected)
-		self.configureGraceATTN()
 
 	#Height threshold 
 	height_threshold = 100
@@ -90,16 +88,19 @@ class GraceAttention:
 		
 		#Logging
 		if(self.raw_id_changed):
-			print("New target patient's raw id is %s" % (self.current_raw_id))
-			print("Accompanying face id is %s" % (self.current_patient_msg.face.id))
+			print("New target patient's raw id is %s" % (self.current_raw_id[-3:]))
+			print("Accompanying face id is %s" % (self.current_patient_msg.face.id[-3:]))
 
 	def configureGraceATTN(self):
-		#Publish the latest patient message 
-		hr_people_msg = hr_msgs.msg.People()
-		hr_people_msg.people.append(self.current_patient_msg)
-		self.hr_people_pub.publish(hr_people_msg)
-		#Dynamic reconfigure to look at the patient
-		self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.hr_ATTN_patient_id, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
+		#A separate asynchronous thread for configuring Grace to attend to the target
+		while(True):
+			#Publish the latest patient message 
+			hr_people_msg = hr_msgs.msg.People()
+			hr_people_msg.people.append(self.current_patient_msg)
+			self.hr_people_pub.publish(hr_people_msg)
+			#Dynamic reconfigure to look at the patient
+			self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.hr_ATTN_patient_id, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
+			rospy.sleep(self.hr_ATTN_reconfig_interval)
 
 	def configureGraceATTNCallback(self, config):
 		# rospy.loginfo("Config set to {look_at_face}, {look_at_time}, {look_at_start}".format(**config))
@@ -114,5 +115,8 @@ if __name__ == '__main__':
 	# args=parser.parse_args()
 
 	grace_attention = GraceAttention()
+	grace_attention.initChestCam()
+	threading._start_new_thread(grace_attention.configureGraceATTN())
 
+	rospy.spin()
 
