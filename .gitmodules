@@ -1,3 +1,6 @@
 [submodule "Person_reID_baseline_pytorch"]
 	path = Person_reID_baseline_pytorch
 	url =  https://github.com/HKUST-NISL/Grace_Attention_ReID.git
+[submodule "Yolov5_StrongSORT_OSNet"]
+	path = Yolov5_StrongSORT_OSNet
+	url = https://github.com/HKUST-NISL/Grace_Attention_Tracking.git
