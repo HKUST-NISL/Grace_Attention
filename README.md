@@ -1,1 +1,1 @@
-Attention module for Grace.
+Attention module for Grace. SORT-based tracking + Person Reid to allow fixating a certain indetified person.
