@@ -1,3 +1,3 @@
 [submodule "Person_reID_baseline_pytorch"]
 	path = Person_reID_baseline_pytorch
-	url = ./Person_reID_baseline_pytorch/
+	url =  https://github.com/HKUST-NISL/Grace_Attention_ReID.git
