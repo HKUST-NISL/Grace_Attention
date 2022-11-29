@@ -11,7 +11,7 @@ import dynamic_reconfigure.client
 from cv_bridge import CvBridge
 import cv2
 from copy import deepcopy
-
+from .Yolov5_StrongSORT_OSNet import grace_track
 class GraceAttention:
 	node_name = "grace_attention_node"
 
@@ -36,12 +36,13 @@ class GraceAttention:
 
 
 	def __init__(self):
-		rospy.init_node(self.node_name)
-		rospy.Subscriber(self.hr_perception_topic,hr_msgs.msg.People,self.peoplePerceptionCallback, queue_size=self.topic_queue_size)
-		rospy.Subscriber(self.hr_img_topic, sensor_msgs.msg.Image,self.chestCamRGBImgCallback, queue_size=self.topic_queue_size)
-		self.hr_people_pub = rospy.Publisher(self.hr_perception_topic, hr_msgs.msg.People, queue_size=self.topic_queue_size)
-		self.dynamic_CAM_cfg_client = dynamic_reconfigure.client.Client(self.hr_CAM_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.configureGraceCAMCallback)
-		self.dynamic_ATTN_cfg_client = dynamic_reconfigure.client.Client(self.hr_ATTN_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.configureGraceATTNCallback)
+		# rospy.init_node(self.node_name)
+		# rospy.Subscriber(self.hr_perception_topic,hr_msgs.msg.People,self.peoplePerceptionCallback, queue_size=self.topic_queue_size)
+		# rospy.Subscriber(self.hr_img_topic, sensor_msgs.msg.Image,self.chestCamRGBImgCallback, queue_size=self.topic_queue_size)
+		# self.hr_people_pub = rospy.Publisher(self.hr_perception_topic, hr_msgs.msg.People, queue_size=self.topic_queue_size)
+		# self.dynamic_CAM_cfg_client = dynamic_reconfigure.client.Client(self.hr_CAM_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.configureGraceCAMCallback)
+		# self.dynamic_ATTN_cfg_client = dynamic_reconfigure.client.Client(self.hr_ATTN_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.configureGraceATTNCallback)
+		self.grace_tracker = grace_track.GraceTracker("grace_tracker")
 
 	def initChestCam(self):
 		#tilt chest cam to a pre-defined angle
@@ -114,10 +115,10 @@ if __name__ == '__main__':
 	# args=parser.parse_args()
 
 	grace_attention = GraceAttention()
-	grace_attention.initChestCam()
-	threading._start_new_thread(grace_attention.configureGraceATTN())
+	# grace_attention.initChestCam()
+	# threading._start_new_thread(grace_attention.configureGraceATTN())
 
-	rospy.spin()
+	# rospy.spin()
 
 
 
