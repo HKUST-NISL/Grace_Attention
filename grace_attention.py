@@ -50,46 +50,55 @@ def drawPose(img, person,  color=(0,255,0),diameter=4, line_width = 2):
 class GraceAttention:
 	node_name = "grace_attention"
 
-	bridge = CvBridge()
+	cv_bridge = CvBridge()
 
 	hr_perception_topic = "/hr/perception/people"
 	hr_img_topic = "/hr/sensors/vision/realsense/camera/color/image_raw"
-	topic_queue_size = 100
+	topic_queue_size = 1
+	latest_people_msg = None
+	tracking_start_people_msg = None
+	debug_img = None
 
-	hr_ATTN_reconfig_rate = 1 #Hz
 	dynamic_reconfig_request_timeout = 0.5
 
 	hr_CAM_cfg_server = "/hr/perception/camera_angle"
-	hr_ATTN_cfg_server = "/hr/behavior/attention"
 	grace_chest_cam_motor_angle = 0.15
-	hr_ATTN_patient_id = "patient"
+
+	hr_ATTN_cfg_server = "/hr/behavior/attention"
 	hr_ATTN_timeout = 2.0
-
-	tracker_polling_rate = 30#Hz
-
-	inerested_source_idx = 0	#Assume we only use source 0
-	latest_people_msg = None
-	
 	attn_id_now = None
+
+	tracker_polling_rate = 5#Hz
+	inerested_source_idx = 0	#Assume we only use source 0
+	
+	main_thread  = None
+	main_thread_rate = 1 #Hz
 
 
 	def __init__(self):
+		#Thread safety
+		self.people_msg_lock = threading.Lock()
+
+
 		#ROS IO
 		rospy.init_node(self.node_name)
+
 		rospy.Subscriber(self.hr_perception_topic,hr_msgs.msg.People,self.__peoplePerceptionCallback, queue_size=self.topic_queue_size)
 		rospy.Subscriber(self.hr_img_topic, sensor_msgs.msg.Image,self.__chestCamRGBImgCallback, queue_size=self.topic_queue_size)
 		self.hr_people_pub = rospy.Publisher(self.hr_perception_topic, hr_msgs.msg.People, queue_size=self.topic_queue_size)
+		
 		self.dynamic_CAM_cfg_client = dynamic_reconfigure.client.Client(self.hr_CAM_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceCAMCallback)
 		self.dynamic_ATTN_cfg_client = dynamic_reconfigure.client.Client(self.hr_ATTN_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceATTNCallback)
 		
 		#Tracking module initialization
 		self.grace_tracker = grace_track.GraceTracker(
-			self.__trackingCallBack,
+			self.__trackingStartCallBack,
+			self.__trackingFinishCallBack,
 			[self.hr_img_topic],
 			"0")
 
 	def mainThread(self):
-		rate = rospy.Rate(self.hr_ATTN_reconfig_rate)
+		rate = rospy.Rate(self.main_thread_rate)
 		while(True):
 			self.__configureGraceATTN()
 			rate.sleep()
@@ -99,11 +108,17 @@ class GraceAttention:
 		self.annotate_img = annotate
 		self.__initChestCam()
 
+
+		#Start tracking 
+		
 		#Debug: For source 0, use a test image
 		test_img_path = os.path.join(grace_track.ROOT,'1669796149240.jpg')
 		self.grace_tracker.registerQueryImage(0, cv2.imread(test_img_path))
-
+		###
 		self.grace_tracker.startTracking(self.tracker_polling_rate, False, annotate)#Visualize at attention module level
+
+		#Start main thread
+		self.mainThread()
 
 	def __initChestCam(self):
 		#tilt chest cam to a pre-defined angle
@@ -119,52 +134,86 @@ class GraceAttention:
 		pass
 
 	def __peoplePerceptionCallback(self,people_msg):
+		self.people_msg_lock.acquire()
 		self.latest_people_msg = people_msg
+		# #For debugging
+		# print('people @ %f'%(time.time()))
+		# if(self.debug_img is not None):
+		# 	for person in self.latest_people_msg.people:
+		# 		drawPose(self.debug_img,person)
+		# 	cv2.imshow('debug',self.debug_img)
+		# 	cv2.waitKey(1)
+		self.people_msg_lock.release()
 
 	def __chestCamRGBImgCallback(self, image_msg):
+		# #For debugging
+		# print('img@ %f'%(time.time()))
+		# self.debug_img =deepcopy(self.cv_bridge.imgmsg_to_cv2(image_msg,desired_encoding='bgr8'))
 		pass
+
 
 	def __configureGraceATTN(self):
 		if(self.attn_id_now is not None):
 			self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.attn_id_now, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
+		pass
 
-	def __trackingCallBack(self, tracking_results, target_idx_among_tracked_obj, annotated_frames):
+	def __trackingStartCallBack(self):
+		self.people_msg_lock.acquire()
+		#keep a deep copy of the people msg at this instant
+		self.tracking_start_people_msg = deepcopy(self.latest_people_msg)
+		self.people_msg_lock.release()
+
+	def __trackingFinishCallBack(self, tracking_results, target_idx_among_tracked_obj, annotated_frames):		
 		#For now we assume only one of the sources are of interest
 		if(
 			tracking_results[self.inerested_source_idx] is not None 
 			and 
 			target_idx_among_tracked_obj[self.inerested_source_idx] is not None
 			and
-			len(self.latest_people_msg.people) > 0
+			self.tracking_start_people_msg is not None
+			and
+			len(self.tracking_start_people_msg.people) > 0
 		):
 			t0 = time.time()
+		
 			#Check which person detected best-matches the target found by the tracker
 			#we do this by counting landmarks within a bounding box
 			x0,y0,x1,y1 = tracking_results[self.inerested_source_idx][target_idx_among_tracked_obj[self.inerested_source_idx]].getBBox()
-			n_people = len(self.latest_people_msg.people)
-			landmark_matching_cnt = [0] * n_people
+			n_people = len(self.tracking_start_people_msg.people)
+			
+			landmark_matching_score = [0] * n_people
 			for i in range(n_people):
-				person = self.latest_people_msg.people[i]
+				person = self.tracking_start_people_msg.people[i]
+
+				#Compute a score to relate tracking bounding box with pose from hrsdk
+				#Use bounding box inclusion counting
 				for lm in person.body.landmarks:
 					if(lm.x >= x0 and lm.x <= x1 and lm.y >= y0 and lm.y <= y1):
-						landmark_matching_cnt[i] = landmark_matching_cnt[i] + 1
-			sort_idx = numpy.argsort(numpy.array(landmark_matching_cnt))
-			best_match_idx = sort_idx[-1]
-			best_match_person = self.latest_people_msg.people[best_match_idx]
-			t1 = time.time()
+							landmark_matching_score[i] = landmark_matching_score[i] + 1
+				# #For debugging
+				# drawPose(annotated_frames[self.inerested_source_idx],person,(0,255,0))
 
+
+			sort_idx = numpy.argsort(numpy.array(landmark_matching_score))
+			best_match_idx = sort_idx[-1]
+			best_match_person = self.tracking_start_people_msg.people[best_match_idx]
+			
+			t1 = time.time()
 			print("[Attention Module]: pose-binding took %.3f seconds." % (t1 - t0))
 
 			#Further annotate the image by drawing pose tree of the matching target
 			if(self.annotate_img):
-				drawPose(annotated_frames[self.inerested_source_idx],best_match_person)
+				drawPose(annotated_frames[self.inerested_source_idx],best_match_person,(0,0,255))
 
 			#Configure grace to look at this person
 			self.attn_id_now = best_match_person.id
 		else:
 			self.attn_id_now = None
 
-		#Show the annotated img of the source of interest
+		#Drop the people message
+		self.tracking_start_people_msg = None
+
+		# #Show the annotated img of the source of interest
 		if(self.attention_vis):
 			cv2.imshow("Attention View",annotated_frames[self.inerested_source_idx])
 			cv2.waitKey(1)
@@ -181,14 +230,19 @@ if __name__ == '__main__':
 	# parser.add_argument("--topic", help="/grace_chat")
 	# args=parser.parse_args()
 
-	grace_attention = GraceAttention()
-	grace_attention.runAttention(True,True)
-
 	signal(SIGINT, handle_sigint)
-	grace_attention.mainThread()
+
+	grace_attention = GraceAttention()
+
+	grace_attention.runAttention(True,True)
 	
+	# #For dbeugging
+	# r = rospy.Rate(1)
+	# while(True):
+	# 	print('1 sec @ %f' %(time.time()))
+	# 	r.sleep()
 
-
+	rospy.spin()
 
 
 
