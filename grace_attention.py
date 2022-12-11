@@ -16,6 +16,8 @@ import cv2
 from copy import deepcopy
 from .Yolov5_StrongSORT_OSNet import grace_track
 import os
+from tkinter import *
+import PIL.Image, PIL.ImageTk
 
 POSE_CHAIN = [
 	("nose", "leftEye"), ("leftEye", "leftEar"), ("nose", "rightEye"),
@@ -54,7 +56,7 @@ class GraceAttention:
 
 	hr_perception_topic = "/hr/perception/people"
 	hr_img_topic = "/hr/sensors/vision/realsense/camera/color/image_raw"
-	topic_queue_size = 1
+	topic_queue_size = 100
 	latest_people_msg = None
 	tracking_start_people_msg = None
 	debug_img = None
@@ -68,7 +70,7 @@ class GraceAttention:
 	hr_ATTN_timeout = 2.0
 	attn_id_now = None
 
-	tracker_polling_rate = 5#Hz
+	tracker_polling_rate = 10#Hz
 	inerested_source_idx = 0	#Assume we only use source 0
 	
 	main_thread  = None
@@ -84,7 +86,7 @@ class GraceAttention:
 		rospy.init_node(self.node_name)
 
 		rospy.Subscriber(self.hr_perception_topic,hr_msgs.msg.People,self.__peoplePerceptionCallback, queue_size=self.topic_queue_size)
-		rospy.Subscriber(self.hr_img_topic, sensor_msgs.msg.Image,self.__chestCamRGBImgCallback, queue_size=self.topic_queue_size)
+		# rospy.Subscriber(self.hr_img_topic, sensor_msgs.msg.Image,self.__chestCamRGBImgCallback, queue_size=self.topic_queue_size)
 		self.hr_people_pub = rospy.Publisher(self.hr_perception_topic, hr_msgs.msg.People, queue_size=self.topic_queue_size)
 		
 		self.dynamic_CAM_cfg_client = dynamic_reconfigure.client.Client(self.hr_CAM_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceCAMCallback)
@@ -92,8 +94,8 @@ class GraceAttention:
 		
 		#Tracking module initialization
 		self.grace_tracker = grace_track.GraceTracker(
-			self.__trackingStartCallBack,
-			self.__trackingFinishCallBack,
+			self.__trackingIterationStartCallBack,
+			self.__trackingIterationFinishCallBack,
 			[self.hr_img_topic],
 			"0")
 
@@ -109,16 +111,58 @@ class GraceAttention:
 		self.__initChestCam()
 
 
-		#Start tracking 
-		
-		#Debug: For source 0, use a test image
-		test_img_path = os.path.join(grace_track.ROOT,'1669796149240.jpg')
-		self.grace_tracker.registerQueryImage(0, cv2.imread(test_img_path))
-		###
+		#Start tracking (note that without registering a query image no actual re-indentification would be performed)
 		self.grace_tracker.startTracking(self.tracker_polling_rate, False, annotate)#Visualize at attention module level
+
+		#Create the target reg text input gui
+		self.target_reg_thread = threading.Thread(self.createTargetRegGui(),daemon=False)
 
 		#Start main thread
 		self.mainThread()
+
+	def __TargetRegCuiClos(self):
+		self.target_reg_frame.destroy()
+
+	def createTargetRegGui(self):
+		#Frame
+		self.target_reg_frame = Tk()
+		self.target_reg_frame.title("ATTN Target Reg")
+		self.target_reg_frame.geometry('900x450')
+		#Text box
+		self.target_reg_input = Text(self.target_reg_frame,
+                   height = 5,
+                   width = 20)
+		self.target_reg_input.pack()
+		#Button Creation
+		printButton = Button(self.target_reg_frame,
+								text = "REG", 
+								command = self.targetRegCallback)
+		printButton.pack()
+		# Label Creation
+		lbl = Label(self.target_reg_frame, text = "")
+		lbl.pack()
+		#Room for image visualization
+		self.source_0_target_img_canvas = Canvas(self.target_reg_frame, width = 640, height = 480)
+		blank_img = PIL.ImageTk.PhotoImage(image=PIL.Image.new("RGB", (640, 480)))
+		self.source_0_target_img_container = self.source_0_target_img_canvas.create_image(0,0, anchor=NW, image=blank_img)
+		self.source_0_target_img_canvas.pack()
+		#Blocks
+		self.target_reg_frame.mainloop()
+
+	def targetRegCallback(self):
+		target_raw_idx = int(self.target_reg_input.get(1.0, "end-1c"))
+		source_0_tracked_obj = self.grace_tracker.getTrackedObjByRawIdx(target_raw_idx,0)
+		if(source_0_tracked_obj is not None):
+			self.source_0_target_img = source_0_tracked_obj.copyCroppedImg()
+			self.__regQueryImg(self.source_0_target_img,0)
+			#Visualization
+			self.source_0_target_img_corrected = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.cvtColor(self.source_0_target_img, cv2.COLOR_BGR2RGB)))
+			self.source_0_target_img_canvas.itemconfig(self.source_0_target_img_container,image=self.source_0_target_img_corrected)
+		else:
+			print("Failed to retrieve the tracked object corresponding to the raw idx %d." % (target_raw_idx))
+
+	def __regQueryImg(self, query_img , souorce_idx = 0):
+		self.grace_tracker.registerQueryImage(souorce_idx, query_img)
 
 	def __initChestCam(self):
 		#tilt chest cam to a pre-defined angle
@@ -151,19 +195,18 @@ class GraceAttention:
 		# self.debug_img =deepcopy(self.cv_bridge.imgmsg_to_cv2(image_msg,desired_encoding='bgr8'))
 		pass
 
-
 	def __configureGraceATTN(self):
 		if(self.attn_id_now is not None):
 			self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.attn_id_now, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
 		pass
 
-	def __trackingStartCallBack(self):
+	def __trackingIterationStartCallBack(self):
 		self.people_msg_lock.acquire()
 		#keep a deep copy of the people msg at this instant
 		self.tracking_start_people_msg = deepcopy(self.latest_people_msg)
 		self.people_msg_lock.release()
 
-	def __trackingFinishCallBack(self, tracking_results, target_idx_among_tracked_obj, annotated_frames):		
+	def __trackingIterationFinishCallBack(self, tracking_results, target_idx_among_tracked_obj, annotated_frames):		
 		#For now we assume only one of the sources are of interest
 		if(
 			tracking_results[self.inerested_source_idx] is not None 
