@@ -54,7 +54,8 @@ class GraceAttention:
 
 	cv_bridge = CvBridge()
 
-	hr_perception_topic = "/hr/perception/people"
+	hr_face_target_topic = "/hr/animation/set_face_target"
+	hr_people_perception_topic = "/hr/perception/people"
 	hr_img_topic = "/hr/sensors/vision/realsense/camera/color/image_raw"
 	topic_queue_size = 100
 	latest_people_msg = None
@@ -69,13 +70,19 @@ class GraceAttention:
 	hr_ATTN_cfg_server = "/hr/behavior/attention"
 	hr_ATTN_timeout = 2.0
 	attn_id_now = None
+	target_person_msg = None
+
+	gaze_averting = False
+	gaze_aversion_person_msg = None
+	aversion_target_id = "gaze_aversion"
+	aversion_loc_std = 3#meter
+
 
 	tracker_polling_rate = 10#Hz
-	inerested_source_idx = 0	#Assume we only use source 0
+	inerested_source_idx = 0#Assume we only use source 0
 	
 	main_thread  = None
-	main_thread_rate = 1 #Hz
-
+	main_thread_rate = 2 #Hz
 
 	def __init__(self):
 		#Thread safety
@@ -85,10 +92,12 @@ class GraceAttention:
 		#ROS IO
 		rospy.init_node(self.node_name)
 
-		rospy.Subscriber(self.hr_perception_topic,hr_msgs.msg.People,self.__peoplePerceptionCallback, queue_size=self.topic_queue_size)
+		rospy.Subscriber(self.hr_people_perception_topic,hr_msgs.msg.People,self.__peoplePerceptionCallback, queue_size=self.topic_queue_size)
+		self.people_pub = rospy.Publisher(self.hr_people_perception_topic, hr_msgs.msg.People, queue_size=self.topic_queue_size)
 		# rospy.Subscriber(self.hr_img_topic, sensor_msgs.msg.Image,self.__chestCamRGBImgCallback, queue_size=self.topic_queue_size)
-		self.hr_people_pub = rospy.Publisher(self.hr_perception_topic, hr_msgs.msg.People, queue_size=self.topic_queue_size)
-		
+		self.hr_people_pub = rospy.Publisher(self.hr_people_perception_topic, hr_msgs.msg.People, queue_size=self.topic_queue_size)
+		self.hr_face_target_pub = rospy.Publisher(self.hr_face_target_topic, hr_msgs.msg.Target, queue_size=self.topic_queue_size)
+
 		self.dynamic_CAM_cfg_client = dynamic_reconfigure.client.Client(self.hr_CAM_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceCAMCallback)
 		self.dynamic_ATTN_cfg_client = dynamic_reconfigure.client.Client(self.hr_ATTN_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceATTNCallback)
 		
@@ -115,15 +124,16 @@ class GraceAttention:
 		self.grace_tracker.startTracking(self.tracker_polling_rate, False, annotate)#Visualize at attention module level
 
 		#Create the target reg text input gui
-		self.target_reg_thread = threading.Thread(self.createTargetRegGui(),daemon=False)
+		self.target_reg_thread = threading.Thread(target = self.__targetRegGui,daemon = False)
+		self.target_reg_thread.start()
 
 		#Start main thread
 		self.mainThread()
 
-	def __TargetRegCuiClos(self):
+	def __TargetRegGuiClose(self):
 		self.target_reg_frame.destroy()
 
-	def createTargetRegGui(self):
+	def __targetRegGui(self):
 		#Frame
 		self.target_reg_frame = Tk()
 		self.target_reg_frame.title("ATTN Target Reg")
@@ -138,6 +148,17 @@ class GraceAttention:
 								text = "REG", 
 								command = self.targetRegCallback)
 		printButton.pack()
+
+		aversionButton = Button(self.target_reg_frame,
+								text = "AVERSION", 
+								command = self.doAversion)
+		aversionButton.pack()
+
+		stopAversionButton = Button(self.target_reg_frame,
+								text = "STOP AVERSION", 
+								command = self.stopAversion)
+		stopAversionButton.pack()
+
 		# Label Creation
 		lbl = Label(self.target_reg_frame, text = "")
 		lbl.pack()
@@ -162,6 +183,7 @@ class GraceAttention:
 			print("Failed to retrieve the tracked object corresponding to the raw idx %d." % (target_raw_idx))
 
 	def __regQueryImg(self, query_img , souorce_idx = 0):
+		#Register new query target
 		self.grace_tracker.registerQueryImage(souorce_idx, query_img)
 
 	def __initChestCam(self):
@@ -196,9 +218,49 @@ class GraceAttention:
 		pass
 
 	def __configureGraceATTN(self):
+		print("Configuring grace attention...")
+		if( (self.attn_id_now is not None) and (self.gaze_averting == False) ):
+			try:
+				self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.attn_id_now, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
+			except Exception as e:
+				print(e)
+		elif (self.gaze_averting):
+			print("Perform gaze aversion.")
+			self.__publishGazeAversionTarget()
+			try:
+				self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.gaze_aversion_person_msg.id, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
+			except Exception as e:
+				print(e)
+		else:
+			pass
+
+	def doAversion(self):
+		self.__createGazeAversionTarget()
+		self.__publishGazeAversionTarget()
+		self.gaze_averting = True
+	
+	def stopAversion(self):
+		self.gaze_averting = False
+
+	def __publishGazeAversionTarget(self):
+		hr_people = hr_msgs.msg.People()
+		hr_people.people.append(self.gaze_aversion_person_msg)
+		self.hr_people_pub.publish(hr_people)
+
+	def __createGazeAversionTarget(self):
 		if(self.attn_id_now is not None):
-			self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.attn_id_now, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
-		pass
+			# # Offset around a person message
+			self.gaze_aversion_person_msg = deepcopy(self.target_person_msg)
+			self.gaze_aversion_person_msg.id = self.aversion_target_id
+
+			#Perturb the location of the person to create a fake person for aversion
+			old_point = self.target_person_msg.body.location
+
+			new_point.x = old_point.x + numpy.random.normal(0.0, self.aversion_loc_std)
+			new_point.y = old_point.y + numpy.random.normal(0.0, self.aversion_loc_std)
+			new_point.z = old_point.z + numpy.random.normal(0.0, self.aversion_loc_std)
+			
+			self.gaze_aversion_person_msg.body.location = new_point
 
 	def __trackingIterationStartCallBack(self):
 		self.people_msg_lock.acquire()
@@ -228,6 +290,9 @@ class GraceAttention:
 			for i in range(n_people):
 				person = self.tracking_start_people_msg.people[i]
 
+				if(person.id == self.aversion_target_id):
+					continue #Skip the fake aversion target
+
 				#Compute a score to relate tracking bounding box with pose from hrsdk
 				#Use bounding box inclusion counting
 				for lm in person.body.landmarks:
@@ -236,22 +301,27 @@ class GraceAttention:
 				# #For debugging
 				# drawPose(annotated_frames[self.inerested_source_idx],person,(0,255,0))
 
-
-			sort_idx = numpy.argsort(numpy.array(landmark_matching_score))
-			best_match_idx = sort_idx[-1]
-			best_match_person = self.tracking_start_people_msg.people[best_match_idx]
-			
 			t1 = time.time()
 			print("[Attention Module]: pose-binding took %.3f seconds." % (t1 - t0))
 
-			#Further annotate the image by drawing pose tree of the matching target
-			if(self.annotate_img):
-				drawPose(annotated_frames[self.inerested_source_idx],best_match_person,(0,0,255))
+			sort_idx = numpy.argsort(numpy.array(landmark_matching_score))
+			best_match_idx = sort_idx[-1]
+			if(landmark_matching_score[best_match_idx] > 0):#At least one skeleton points need to fall inside the bounding box
+				best_match_person = self.tracking_start_people_msg.people[best_match_idx]
 
-			#Configure grace to look at this person
-			self.attn_id_now = best_match_person.id
+				#Further annotate the image by drawing pose tree of the matching target
+				if(self.annotate_img):
+					drawPose(annotated_frames[self.inerested_source_idx],best_match_person,(0,0,255))
+
+				#Configure grace to look at this person
+				self.attn_id_now = best_match_person.id
+				self.target_person_msg = deepcopy(best_match_person)
+			else:
+				self.attn_id_now = None
+				self.target_person_msg = None
 		else:
 			self.attn_id_now = None
+			self.target_person_msg = None
 
 		#Drop the people message
 		self.tracking_start_people_msg = None
