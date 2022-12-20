@@ -9,6 +9,7 @@ import rospy
 import sensor_msgs.msg
 import std_msgs.msg
 import hr_msgs.msg
+import rosbag
 import geometry_msgs.msg
 import dynamic_reconfigure.client
 from cv_bridge import CvBridge
@@ -71,11 +72,20 @@ class GraceAttention:
 	hr_ATTN_timeout = 2.0
 	attn_id_now = None
 	target_person_msg = None
+	# people_debug_bag = None
 
-	gaze_averting = False
-	gaze_aversion_person_msg = None
-	aversion_target_id = "gaze_aversion"
-	aversion_loc_std = 3#meter
+	aversion_enabled = False #Whether the random aversion is enabled
+	is_gaze_averting = False #Whether it's averting at the moment
+	gaze_aversion_start_time = None
+	gaze_aversion_stop_time = None
+	gaze_aversion_target_msg = None
+
+	#Some parameters for aversion
+	aversion_target_id = "gaze_aversion_target"
+	aversion_loc_range = [0.1,0.3]
+	aversion_mean_interval = 10#seconds
+	aversion_duration_range = [1,5]#seconds
+	aversion_thread_rate = 5#Hz
 
 
 	tracker_polling_rate = 10#Hz
@@ -119,9 +129,15 @@ class GraceAttention:
 		self.annotate_img = annotate
 		self.__initChestCam()
 
+		# #For debugging the people topic
+		# self.people_debug_bag = rosbag.Bag('people_topic_debug.bag', 'w')
 
-		#Start tracking (note that without registering a query image no actual re-indentification would be performed)
+		#Start tracking thread (note that without registering a query image no actual re-indentification would be performed)
 		self.grace_tracker.startTracking(self.tracker_polling_rate, False, annotate)#Visualize at attention module level
+
+		#Start the gaze aversion thread
+		self.grace_aversion_thread = threading.Thread(target = self.__aversionThread,daemon = False)
+		self.grace_aversion_thread.start()
 
 		#Create the target reg text input gui
 		self.target_reg_thread = threading.Thread(target = self.__targetRegGui,daemon = False)
@@ -149,15 +165,20 @@ class GraceAttention:
 								command = self.targetRegCallback)
 		printButton.pack()
 
-		aversionButton = Button(self.target_reg_frame,
-								text = "AVERSION", 
-								command = self.doAversion)
-		aversionButton.pack()
+		enableAversionButton = Button(self.target_reg_frame,
+								text = "ENABLE AVERSION", 
+								command = self.enableAversion)
+		enableAversionButton.pack()
 
-		stopAversionButton = Button(self.target_reg_frame,
-								text = "STOP AVERSION", 
-								command = self.stopAversion)
-		stopAversionButton.pack()
+		disableAversionButton = Button(self.target_reg_frame,
+								text = "DISABLE AVERSION", 
+								command = self.disableAversion)
+		disableAversionButton.pack()
+
+		# writeBagButton = Button(self.target_reg_frame,
+		# 						text = "WRITE BAG", 
+		# 						command = self.__writeBag)
+		# writeBagButton.pack()
 
 		# Label Creation
 		lbl = Label(self.target_reg_frame, text = "")
@@ -209,6 +230,11 @@ class GraceAttention:
 		# 		drawPose(self.debug_img,person)
 		# 	cv2.imshow('debug',self.debug_img)
 		# 	cv2.waitKey(1)
+		
+		# #For people message debugging
+		# if(self.people_debug_bag is not None):
+		# 	self.people_debug_bag.write(self.hr_people_perception_topic, people_msg)
+		
 		self.people_msg_lock.release()
 
 	def __chestCamRGBImgCallback(self, image_msg):
@@ -218,49 +244,102 @@ class GraceAttention:
 		pass
 
 	def __configureGraceATTN(self):
-		print("Configuring grace attention...")
-		if( (self.attn_id_now is not None) and (self.gaze_averting == False) ):
-			try:
-				self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.attn_id_now, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
-			except Exception as e:
-				print(e)
-		elif (self.gaze_averting):
-			print("Perform gaze aversion.")
+		if(self.is_gaze_averting == False):
+			#Do normal tracking
+			if( self.attn_id_now is not None ):
+				try:
+					self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.attn_id_now, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
+					print("Configuring grace attention on target %s." % (self.attn_id_now))
+				except Exception as e:
+					print(e)
+		else:
+			#Look at aversion target
+			print("Gaze Averting.")
 			self.__publishGazeAversionTarget()
 			try:
-				self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.gaze_aversion_person_msg.id, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
+				self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.gaze_aversion_target_msg.id, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
 			except Exception as e:
 				print(e)
-		else:
-			pass
 
-	def doAversion(self):
-		self.__createGazeAversionTarget()
-		self.__publishGazeAversionTarget()
-		self.gaze_averting = True
+	def enableAversion(self):
+		#Setup the first time stamp for aversion
+		self.__setupAversionTime(time.time())
+		#Enable the aversion mechanism
+		self.aversion_enabled = True
+		
 	
-	def stopAversion(self):
-		self.gaze_averting = False
+	def disableAversion(self):
+		#Disable the aversion mechanism
+		self.aversion_enabled = False
+
+	def __aversionThread(self):
+		rate = rospy.Rate(self.aversion_thread_rate)
+		while(True):
+			if(self.aversion_enabled):
+				t = time.time()
+				if(self.is_gaze_averting == False):
+					if(t >= self.gaze_aversion_start_time):
+						#Create a new aversion target
+						self.__createGazeAversionTarget()
+						#Indicate the averting state
+						self.is_gaze_averting = True
+				else:
+					if(t >= self.gaze_aversion_end_time):
+						#Stop the current averting act
+						self.is_gaze_averting = False
+						#Decide the timing for the next aversion
+						self.__setupAversionTime(t)
+			else:
+				self.is_gaze_averting = False
+
+			rate.sleep()
+
+	def __setupAversionTime(self, ref_time):
+		#Start time of aversion
+		self.gaze_aversion_start_time = ref_time + numpy.random.exponential(self.aversion_mean_interval)
+		#Duration of aversion
+		dur = numpy.random.uniform(self.aversion_duration_range[0],self.aversion_duration_range[1])
+		self.gaze_aversion_end_time = self.gaze_aversion_start_time + dur
 
 	def __publishGazeAversionTarget(self):
 		hr_people = hr_msgs.msg.People()
-		hr_people.people.append(self.gaze_aversion_person_msg)
+		hr_people.people.append(self.gaze_aversion_target_msg)
 		self.hr_people_pub.publish(hr_people)
 
 	def __createGazeAversionTarget(self):
 		if(self.attn_id_now is not None):
-			# # Offset around a person message
-			self.gaze_aversion_person_msg = deepcopy(self.target_person_msg)
-			self.gaze_aversion_person_msg.id = self.aversion_target_id
+			try:
+				# # Offset around a person message
+				self.gaze_aversion_target_msg = deepcopy(self.target_person_msg)
+				self.gaze_aversion_target_msg.id = self.aversion_target_id
 
-			#Perturb the location of the person to create a fake person for aversion
-			old_point = self.target_person_msg.body.location
+				#Perturb the location of the person to create a fake person for aversion
+				old_point = self.target_person_msg.body.location
+				new_point = geometry_msgs.msg.Point()
+				new_point.x = old_point.x + 2 * (numpy.random.binomial(1, 0.5) - 0.5) * numpy.random.uniform(self.aversion_loc_range[0],self.aversion_loc_range[1])
+				new_point.y = old_point.y + 2 * (numpy.random.binomial(1, 0.5) - 0.5) * numpy.random.uniform(self.aversion_loc_range[0],self.aversion_loc_range[1])
+				new_point.z = old_point.z + 2 * (numpy.random.binomial(1, 0.5) - 0.5) * numpy.random.uniform(self.aversion_loc_range[0],self.aversion_loc_range[1])
+				# new_point.y = 0.5
+				# new_point.x = 0.5
+				# new_point.z = 0.5
 
-			new_point.x = old_point.x + numpy.random.normal(0.0, self.aversion_loc_std)
-			new_point.y = old_point.y + numpy.random.normal(0.0, self.aversion_loc_std)
-			new_point.z = old_point.z + numpy.random.normal(0.0, self.aversion_loc_std)
+				self.gaze_aversion_target_msg.body.location = new_point
+			except Exception as e:
+				print(e)
+		else:
+			self.gaze_aversion_target_msg = hr_msgs.msg.Person()
+			self.gaze_aversion_target_msg.id = self.aversion_target_id
 			
-			self.gaze_aversion_person_msg.body.location = new_point
+			new_point = geometry_msgs.msg.Point()
+			new_point.x = 2 * (numpy.random.binomial(1, 0.5) - 0.5) * numpy.random.uniform(self.aversion_loc_range[0],self.aversion_loc_range[1])
+			new_point.y = 2 * (numpy.random.binomial(1, 0.5) - 0.5) * numpy.random.uniform(self.aversion_loc_range[0],self.aversion_loc_range[1])
+			new_point.z = 2 * (numpy.random.binomial(1, 0.5) - 0.5) * numpy.random.uniform(self.aversion_loc_range[0],self.aversion_loc_range[1])
+			
+			self.gaze_aversion_target_msg.body.location = new_point
+
+	def __writeBag(self):
+		self.people_debug_bag.close()
+		self.people_debug_bag = None
 
 	def __trackingIterationStartCallBack(self):
 		self.people_msg_lock.acquire()
@@ -291,7 +370,7 @@ class GraceAttention:
 				person = self.tracking_start_people_msg.people[i]
 
 				if(person.id == self.aversion_target_id):
-					continue #Skip the fake aversion target
+					return #Skip the people message with fake aversion target
 
 				#Compute a score to relate tracking bounding box with pose from hrsdk
 				#Use bounding box inclusion counting
