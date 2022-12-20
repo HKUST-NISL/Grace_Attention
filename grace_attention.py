@@ -62,6 +62,7 @@ class GraceAttention:
 	latest_people_msg = None
 	tracking_start_people_msg = None
 	debug_img = None
+	tracking_state_text = "tracking"
 
 	dynamic_reconfig_request_timeout = 0.5
 
@@ -86,7 +87,7 @@ class GraceAttention:
 	aversion_mean_interval = 10#seconds
 	aversion_duration_range = [1,5]#seconds
 	aversion_thread_rate = 5#Hz
-
+	aversion_state_text = "Averting"
 
 	tracker_polling_rate = 10#Hz
 	inerested_source_idx = 0#Assume we only use source 0
@@ -175,6 +176,9 @@ class GraceAttention:
 								command = self.disableAversion)
 		disableAversionButton.pack()
 
+		self.stateText = Label(self.target_reg_frame, text = self.tracking_state_text)
+		self.stateText.pack()
+
 		# writeBagButton = Button(self.target_reg_frame,
 		# 						text = "WRITE BAG", 
 		# 						command = self.__writeBag)
@@ -246,6 +250,11 @@ class GraceAttention:
 	def __configureGraceATTN(self):
 		if(self.is_gaze_averting == False):
 			#Do normal tracking
+			try:
+				self.stateText.config(text = self.tracking_state_text)
+			except Exception as e:
+				print(e)
+
 			if( self.attn_id_now is not None ):
 				try:
 					self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.attn_id_now, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
@@ -254,6 +263,7 @@ class GraceAttention:
 					print(e)
 		else:
 			#Look at aversion target
+			self.stateText.config(text = self.aversion_state_text)
 			print("Gaze Averting.")
 			self.__publishGazeAversionTarget()
 			try:
@@ -266,8 +276,7 @@ class GraceAttention:
 		self.__setupAversionTime(time.time())
 		#Enable the aversion mechanism
 		self.aversion_enabled = True
-		
-	
+			
 	def disableAversion(self):
 		#Disable the aversion mechanism
 		self.aversion_enabled = False
