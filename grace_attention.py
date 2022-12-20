@@ -1,3 +1,4 @@
+import logging
 import argparse
 import sys
 import threading
@@ -16,6 +17,7 @@ from cv_bridge import CvBridge
 import cv2
 from copy import deepcopy
 from .Yolov5_StrongSORT_OSNet import grace_track
+from .Yolov5_StrongSORT_OSNet.yolov5.utils.loggers import LOGGER
 import os
 from tkinter import *
 import PIL.Image, PIL.ImageTk
@@ -205,7 +207,7 @@ class GraceAttention:
 			self.source_0_target_img_corrected = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.cvtColor(self.source_0_target_img, cv2.COLOR_BGR2RGB)))
 			self.source_0_target_img_canvas.itemconfig(self.source_0_target_img_container,image=self.source_0_target_img_corrected)
 		else:
-			print("Failed to retrieve the tracked object corresponding to the raw idx %d." % (target_raw_idx))
+			LOGGER.warning("Failed to retrieve the tracked object corresponding to the raw idx %d." % (target_raw_idx))
 
 	def __regQueryImg(self, query_img , souorce_idx = 0):
 		#Register new query target
@@ -250,26 +252,27 @@ class GraceAttention:
 	def __configureGraceATTN(self):
 		if(self.is_gaze_averting == False):
 			#Do normal tracking
+			#text state display
 			try:
 				self.stateText.config(text = self.tracking_state_text)
 			except Exception as e:
-				print(e)
-
+				LOGGER.debug(e)
+			#choose target
 			if( self.attn_id_now is not None ):
 				try:
 					self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.attn_id_now, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
-					print("Configuring grace attention on target %s." % (self.attn_id_now))
+					LOGGER.debug("Configuring grace attention on target %s." % (self.attn_id_now))
 				except Exception as e:
-					print(e)
+					LOGGER.error(e)
 		else:
 			#Look at aversion target
 			self.stateText.config(text = self.aversion_state_text)
-			print("Gaze Averting.")
+			LOGGER.debug("Gaze Averting.")
 			self.__publishGazeAversionTarget()
 			try:
 				self.dynamic_ATTN_cfg_client.update_configuration({"look_at_face":self.gaze_aversion_target_msg.id, "look_at_start":True, "look_at_time":self.hr_ATTN_timeout})
 			except Exception as e:
-				print(e)
+				LOGGER.error(e)
 
 	def enableAversion(self):
 		#Setup the first time stamp for aversion
@@ -309,6 +312,8 @@ class GraceAttention:
 		#Duration of aversion
 		dur = numpy.random.uniform(self.aversion_duration_range[0],self.aversion_duration_range[1])
 		self.gaze_aversion_end_time = self.gaze_aversion_start_time + dur
+		LOGGER.info("New aversion in %f seconds." % (self.gaze_aversion_start_time - ref_time))
+
 
 	def __publishGazeAversionTarget(self):
 		hr_people = hr_msgs.msg.People()
@@ -334,7 +339,7 @@ class GraceAttention:
 
 				self.gaze_aversion_target_msg.body.location = new_point
 			except Exception as e:
-				print(e)
+				LOGGER.error(e)
 		else:
 			self.gaze_aversion_target_msg = hr_msgs.msg.Person()
 			self.gaze_aversion_target_msg.id = self.aversion_target_id
@@ -390,7 +395,7 @@ class GraceAttention:
 				# drawPose(annotated_frames[self.inerested_source_idx],person,(0,255,0))
 
 			t1 = time.time()
-			print("[Attention Module]: pose-binding took %.3f seconds." % (t1 - t0))
+			LOGGER.debug("[Attention Module]: pose-binding took %.3f seconds." % (t1 - t0))
 
 			sort_idx = numpy.argsort(numpy.array(landmark_matching_score))
 			best_match_idx = sort_idx[-1]
@@ -421,7 +426,7 @@ class GraceAttention:
 
 def handle_sigint(signalnum, frame):
     # terminate
-    print('Main interrupted! Exiting.')
+    LOGGER.warning('Main interrupted! Exiting.')
     sys.exit()
 
 if __name__ == '__main__':
