@@ -54,9 +54,14 @@ def drawPose(img, person,  color=(0,255,0),diameter=4, line_width = 2):
 
 class GraceAttention:
 	node_name = "grace_attention"
-
 	cv_bridge = CvBridge()
 
+	#Camera Angling
+	dynamic_reconfig_request_timeout = 0.5
+	hr_CAM_cfg_server = "/hr/perception/camera_angle"
+	grace_chest_cam_motor_angle = 0.15
+
+	#Tracking & Gaze Attention
 	hr_face_target_topic = "/hr/animation/set_face_target"
 	hr_people_perception_topic = "/hr/perception/people"
 	hr_img_topic = "/hr/sensors/vision/realsense/camera/color/image_raw"
@@ -65,25 +70,24 @@ class GraceAttention:
 	tracking_start_people_msg = None
 	debug_img = None
 	tracking_state_text = "tracking"
-
-	dynamic_reconfig_request_timeout = 0.5
-
-	hr_CAM_cfg_server = "/hr/perception/camera_angle"
-	grace_chest_cam_motor_angle = 0.15
-
 	hr_ATTN_cfg_server = "/hr/behavior/attention"
 	hr_ATTN_timeout = 2.0
 	attn_id_now = None
 	target_person_msg = None
 	# people_debug_bag = None
+	tracker_polling_rate = 10#Hz
+	inerested_source_idx = 0#Assume we only use source 0
+	target_person_topic = "/grace_proj/target_person"
+	target_img_topic = "/grace_proj/target_img"
+	no_target_string = "None"
 
+
+	#Aversion
 	aversion_enabled = False #Whether the random aversion is enabled
 	is_gaze_averting = False #Whether it's averting at the moment
 	gaze_aversion_start_time = None
 	gaze_aversion_stop_time = None
 	gaze_aversion_target_msg = None
-
-	#Some parameters for aversion
 	aversion_target_id = "gaze_aversion_target"
 	aversion_loc_range = [0.1,0.3]
 	aversion_mean_interval = 10#seconds
@@ -91,16 +95,18 @@ class GraceAttention:
 	aversion_thread_rate = 5#Hz
 	aversion_state_text = "Averting"
 
-	tracker_polling_rate = 10#Hz
-	inerested_source_idx = 0#Assume we only use source 0
-	
+	#Nodding
+
+
+
+
+	#Miscellaneous	
 	main_thread  = None
 	main_thread_rate = 2 #Hz
 
 	def __init__(self):
 		#Thread safety
 		self.people_msg_lock = threading.Lock()
-
 
 		#ROS IO
 		rospy.init_node(self.node_name)
@@ -110,6 +116,8 @@ class GraceAttention:
 		# rospy.Subscriber(self.hr_img_topic, sensor_msgs.msg.Image,self.__chestCamRGBImgCallback, queue_size=self.topic_queue_size)
 		self.hr_people_pub = rospy.Publisher(self.hr_people_perception_topic, hr_msgs.msg.People, queue_size=self.topic_queue_size)
 		self.hr_face_target_pub = rospy.Publisher(self.hr_face_target_topic, hr_msgs.msg.Target, queue_size=self.topic_queue_size)
+		self.target_person_pub = rospy.Publisher(self.target_person_topic, hr_msgs.msg.Person, queue_size=self.topic_queue_size)
+		self.accompanying_frame_pub = rospy.Publisher(self.target_img_topic, sensor_msgs.msg.Image, queue_size=self.topic_queue_size)
 
 		self.dynamic_CAM_cfg_client = dynamic_reconfigure.client.Client(self.hr_CAM_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceCAMCallback)
 		self.dynamic_ATTN_cfg_client = dynamic_reconfigure.client.Client(self.hr_ATTN_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceATTNCallback)
@@ -120,6 +128,7 @@ class GraceAttention:
 			self.__trackingIterationFinishCallBack,
 			[self.hr_img_topic],
 			"0")
+
 
 	def mainThread(self):
 		rate = rospy.Rate(self.main_thread_rate)
@@ -314,7 +323,6 @@ class GraceAttention:
 		self.gaze_aversion_end_time = self.gaze_aversion_start_time + dur
 		LOGGER.info("New aversion in %f seconds." % (self.gaze_aversion_start_time - ref_time))
 
-
 	def __publishGazeAversionTarget(self):
 		hr_people = hr_msgs.msg.People()
 		hr_people.people.append(self.gaze_aversion_target_msg)
@@ -361,7 +369,12 @@ class GraceAttention:
 		self.tracking_start_people_msg = deepcopy(self.latest_people_msg)
 		self.people_msg_lock.release()
 
-	def __trackingIterationFinishCallBack(self, tracking_results, target_idx_among_tracked_obj, annotated_frames):		
+	def __trackingIterationFinishCallBack(
+		self, 
+		tracking_results, 
+		target_idx_among_tracked_obj, 
+		raw_frames, 
+		annotated_frames):		
 		#For now we assume only one of the sources are of interest
 		if(
 			tracking_results[self.inerested_source_idx] is not None 
@@ -419,10 +432,23 @@ class GraceAttention:
 		#Drop the people message
 		self.tracking_start_people_msg = None
 
-		# #Show the annotated img of the source of interest
+		#Show the annotated img from the source of interest
 		if(self.attention_vis):
 			cv2.imshow("Attention View",annotated_frames[self.inerested_source_idx])
 			cv2.waitKey(1)
+
+		#Publish relevant information for the upcoming expression and gaze detection
+		#Image frame used
+		img_used = self.cv_bridge.cv2_to_imgmsg(raw_frames[self.inerested_source_idx])
+		self.accompanying_frame_pub.publish(img_used)
+		#People msg
+		target_person_msg = hr_msgs.msg.Person()
+		if(self.target_person_msg is None):
+			target_person_msg.id = self.no_target_string
+		else:
+			target_person_msg = deepcopy(self.target_person_msg)
+		self.target_person_pub.publish(target_person_msg)
+
 
 def handle_sigint(signalnum, frame):
     # terminate
