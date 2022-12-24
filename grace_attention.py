@@ -56,6 +56,9 @@ class GraceAttention:
 	node_name = "grace_attention"
 	cv_bridge = CvBridge()
 
+	#Emergency stop
+	stop_topic = "/grace_proj/stop"
+
 	#Camera Angling
 	dynamic_reconfig_request_timeout = 0.5
 	hr_CAM_cfg_server = "/hr/perception/camera_angle"
@@ -130,7 +133,8 @@ class GraceAttention:
 		self.target_person_pub = rospy.Publisher(self.target_person_topic, hr_msgs.msg.Person, queue_size=self.topic_queue_size)
 		self.accompanying_frame_pub = rospy.Publisher(self.target_img_topic, sensor_msgs.msg.Image, queue_size=self.topic_queue_size)
 		self.hr_head_gesture_pub = rospy.Publisher(self.hr_head_gesture_topic, hr_msgs.msg.SetAnimation, queue_size=self.topic_queue_size)
-
+		self.stop_pub = rospy.Publisher(self.stop_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
+		self.stop_sub = rospy.Subscriber(self.stop_topic, std_msgs.msg.Bool, self.__stopMsgCallback, queue_size=self.topic_queue_size)
 		self.dynamic_CAM_cfg_client = dynamic_reconfigure.client.Client(self.hr_CAM_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceCAMCallback)
 		self.dynamic_ATTN_cfg_client = dynamic_reconfigure.client.Client(self.hr_ATTN_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceATTNCallback)
 		
@@ -174,60 +178,100 @@ class GraceAttention:
 		self.mainThread()
 
 	def __TargetATTNGuiClose(self):
-		self.target_reg_frame.destroy()
+		self.attention_ui_frame.destroy()
 
 	def __targetATTNGui(self):
 		#UI Frame
-		self.target_reg_frame = Tk()
-		self.target_reg_frame.title("Grace Attention GUI")
-		self.target_reg_frame.geometry('1280x720')
+		self.attention_ui_frame = Tk()
+		self.attention_ui_frame.title("Grace Attention GUI")
+		self.attention_ui_frame.geometry('1920x1080')
+
+		#STOP
+		stop_btn = Button(self.attention_ui_frame,
+							text = "STOP", 
+							command = self.__stopCallback)
+		# stop_btn.pack()
+		stop_btn.place(y=50, x=50)
+
 
 		#Target Selection
 		self.target_reg_input = Text(
-			self.target_reg_frame,
-			height = 5,
-			width = 20)
+			self.attention_ui_frame,
+			height = 2,
+			width = 10)
 		self.target_reg_input.pack()
-		confirm_target_reg = Button(self.target_reg_frame,
+		self.target_reg_input.place(y=50, x= 300)
+
+		confirm_target_reg = Button(self.attention_ui_frame,
 								text = "REG", 
 								command = self.targetRegCallback)
-		confirm_target_reg.pack()
+		# confirm_target_reg.pack()
+		confirm_target_reg.place(y=50, x= 200)
 
 		#Aversion: enable, disable, state
 		self.aversion_enabled_tk = BooleanVar()
 		enableAversion = Checkbutton(
-			self.target_reg_frame,
+			self.attention_ui_frame,
 			text = "Enable Aversion", 
 			variable= self.aversion_enabled_tk,
 			onvalue = True, offvalue = False,
 			command = self.__toggleAversion)
-		enableAversion.pack()
-		self.aversionStateText = Label(self.target_reg_frame, text = self.tracking_text)
-		self.aversionStateText.pack()
+		# enableAversion.pack()
+		enableAversion.place(y=150, x=50)
+
+		self.aversionStateText = Label(self.attention_ui_frame, text = self.tracking_text)
+		# self.aversionStateText.pack()
+		self.aversionStateText.place(y=150, x=400)
 
 		#Nodding: enable, disable, state
 		self.nodding_enabled_tk = BooleanVar()
 		enableNodding = Checkbutton(
-			self.target_reg_frame,
+			self.attention_ui_frame,
 			text = "ENABLE Nodding", 
 			variable= self.nodding_enabled_tk,
 			onvalue = True, offvalue = False,
 			command = self.__toggleNodding)
-		enableNodding.pack()
-		self.noddingStateText = Label(self.target_reg_frame, text = self.pend_nod_text)
-		self.noddingStateText.pack()
+		# enableNodding.pack()
+		enableNodding.place(y=250, x=50)
+		
+		self.noddingStateText = Label(self.attention_ui_frame, text = self.pend_nod_text)
+		# self.noddingStateText.pack()
+		self.noddingStateText.place(y=250, x=400)
 
 
-		#Image of target person
-		lbl = Label(self.target_reg_frame, text = "")
-		lbl.pack()
-		#Room for image visualization
-		self.source_0_target_img_canvas = Canvas(self.target_reg_frame, width = 640, height = 480)
+		#Visualize the image of the target person
+		self.source_0_target_img_canvas = Canvas(self.attention_ui_frame, width = 640, height = 480)
 		blank_img = PIL.ImageTk.PhotoImage(image=PIL.Image.new("RGB", (640, 480)))
 		self.source_0_target_img_container = self.source_0_target_img_canvas.create_image(0,0, anchor=NW, image=blank_img)
-		self.source_0_target_img_canvas.pack()
+		# self.source_0_target_img_canvas.pack()
+		self.source_0_target_img_canvas.place(y=350, x=750)
+
+
+		#Visualize the image of the camera view
+		self.source_0_img_canvas = Canvas(self.attention_ui_frame, width = 640, height = 480)
+		blank_img = PIL.ImageTk.PhotoImage(image=PIL.Image.new("RGB", (640, 480)))
+		self.source_0_img_container = self.source_0_img_canvas.create_image(0,0, anchor=NW, image=blank_img)
+		# self.source_0_img_canvas.pack()
+		self.source_0_img_canvas.place(y=350, x=50)
+			
+
 		#Blocks
-		self.target_reg_frame.mainloop()
+		self.attention_ui_frame.mainloop()
+
+	def __stopCallback(self):
+		self.stop_pub.publish(std_msgs.msg.Bool(True))
+
+	def __stopMsgCallback(self, msg):
+		if(msg.data):
+			#Stop tracking
+			self.__regQueryImg(None,self.inerested_source_idx)
+			#Stop aversion
+			self.aversion_enabled_tk.set(False)
+			self.__toggleAversion()
+			#Stop nodding
+			self.nodding_enabled_tk.set(False)
+			self.__toggleNodding()
+			LOGGER.error("Everything stopped.")
 
 	def targetRegCallback(self):
 		try:
@@ -351,15 +395,12 @@ class GraceAttention:
 							text = self.averting_text + f"{max(0,self.gaze_aversion_end_time - t):.2f}")
 					except Exception as e:
 						LOGGER.debug(e)
-
-
-
 			else:
 				self.is_gaze_averting = False
 				#text state display
 				try:
 					self.aversionStateText.config(
-						text = self.tracking_text + no_aversion_text)
+						text = self.tracking_text + self.no_aversion_text)
 				except Exception as e:
 					LOGGER.debug(e)
 
@@ -529,8 +570,10 @@ class GraceAttention:
 
 		#Show the annotated img from the source of interest
 		if(self.attention_vis):
-			cv2.imshow("Attention View",annotated_frames[self.inerested_source_idx])
-			cv2.waitKey(1)
+			self.annotated_frame_of_interested_source = annotated_frames[self.inerested_source_idx]
+			self.source_0_annotated_img_vis = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.cvtColor(self.annotated_frame_of_interested_source, cv2.COLOR_BGR2RGB)))
+			self.source_0_img_canvas.itemconfig(self.source_0_img_container,image=self.source_0_annotated_img_vis)
+
 
 		#Publish relevant information for the upcoming expression and gaze detection
 		#Image frame used
