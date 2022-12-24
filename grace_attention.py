@@ -69,7 +69,6 @@ class GraceAttention:
 	latest_people_msg = None
 	tracking_start_people_msg = None
 	debug_img = None
-	tracking_state_text = "tracking"
 	hr_ATTN_cfg_server = "/hr/behavior/attention"
 	hr_ATTN_timeout = 2.0
 	attn_id_now = None
@@ -94,17 +93,21 @@ class GraceAttention:
 	aversion_duration_range = [1,2]#seconds
 	aversion_minimal_interval = 3.0#Seconds
 	aversion_thread_rate = 5#Hz
-	aversion_state_text = "Averting"
+	tracking_text = "Tracking. "
+	no_aversion_text = "Aversion disabled."
+	averting_text = "Averting for"
 
 	#Nodding
+	nodding_enabled = False
 	hr_head_gesture_topic = "/hr/animation/set_animation"
 	hr_nod_type_string = "nod_Short"
 	hr_nod_variants_range = [1,7] #8 and 9 use lower case "s" in SHORT
 	hr_nod_magnitude_range = [0.25,1.0]
-	nodding_enabled = False
 	nodding_mean_interval = 12#Seconds
 	nodding_minimal_interval = 3.0#Seconds
 	noding_thread_rate = 5#Hz
+	pend_nod_text = "Next nod in "
+	no_nod_text = "Nodding disabled."
 
 
 
@@ -174,49 +177,45 @@ class GraceAttention:
 		self.target_reg_frame.destroy()
 
 	def __targetATTNGui(self):
-		#Frame
+		#UI Frame
 		self.target_reg_frame = Tk()
-		self.target_reg_frame.title("ATTN Target Reg")
-		self.target_reg_frame.geometry('900x450')
+		self.target_reg_frame.title("Grace Attention GUI")
+		self.target_reg_frame.geometry('1280x720')
 
-		#Text box
-		self.target_reg_input = Text(self.target_reg_frame,
-                   height = 5,
-                   width = 20)
+		#Target Selection
+		self.target_reg_input = Text(
+			self.target_reg_frame,
+			height = 5,
+			width = 20)
 		self.target_reg_input.pack()
-
-		#Button Creation
-		printButton = Button(self.target_reg_frame,
+		confirm_target_reg = Button(self.target_reg_frame,
 								text = "REG", 
 								command = self.targetRegCallback)
-		printButton.pack()
+		confirm_target_reg.pack()
 
-		#Aversion
-		enableAversionButton = Button(self.target_reg_frame,
-								text = "ENABLE AVERSION", 
-								command = self.enableAversion)
-		enableAversionButton.pack()
+		#Aversion: enable, disable, state
+		self.aversion_enabled_tk = BooleanVar()
+		enableAversion = Checkbutton(
+			self.target_reg_frame,
+			text = "Enable Aversion", 
+			variable= self.aversion_enabled_tk,
+			onvalue = True, offvalue = False,
+			command = self.__toggleAversion)
+		enableAversion.pack()
+		self.aversionStateText = Label(self.target_reg_frame, text = self.tracking_text)
+		self.aversionStateText.pack()
 
-		disableAversionButton = Button(self.target_reg_frame,
-								text = "DISABLE AVERSION", 
-								command = self.disableAversion)
-		disableAversionButton.pack()
-
-		#State
-		self.stateText = Label(self.target_reg_frame, text = self.tracking_state_text)
-		self.stateText.pack()
-
-		#Nodding
-		enableNoddingButton = Button(self.target_reg_frame,
-								text = "ENABLE NODDING", 
-								command = self.enableNodding)
-		enableNoddingButton.pack()
-
-
-		disableNoddingButton = Button(self.target_reg_frame,
-								text = "Disable NODDING", 
-								command = self.disableNodding())
-		disableNoddingButton.pack()
+		#Nodding: enable, disable, state
+		self.nodding_enabled_tk = BooleanVar()
+		enableNodding = Checkbutton(
+			self.target_reg_frame,
+			text = "ENABLE Nodding", 
+			variable= self.nodding_enabled_tk,
+			onvalue = True, offvalue = False,
+			command = self.__toggleNodding)
+		enableNodding.pack()
+		self.noddingStateText = Label(self.target_reg_frame, text = self.pend_nod_text)
+		self.noddingStateText.pack()
 
 
 		#Image of target person
@@ -231,16 +230,21 @@ class GraceAttention:
 		self.target_reg_frame.mainloop()
 
 	def targetRegCallback(self):
-		target_raw_idx = int(self.target_reg_input.get(1.0, "end-1c"))
-		source_0_tracked_obj = self.grace_tracker.getTrackedObjByRawIdx(target_raw_idx,0)
-		if(source_0_tracked_obj is not None):
-			self.source_0_target_img = source_0_tracked_obj.copyCroppedImg()
-			self.__regQueryImg(self.source_0_target_img,0)
-			#Visualization
-			self.source_0_target_img_corrected = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.cvtColor(self.source_0_target_img, cv2.COLOR_BGR2RGB)))
-			self.source_0_target_img_canvas.itemconfig(self.source_0_target_img_container,image=self.source_0_target_img_corrected)
-		else:
-			LOGGER.warning("Failed to retrieve the tracked object corresponding to the raw idx %d." % (target_raw_idx))
+		try:
+			target_raw_idx = int(self.target_reg_input.get(1.0, "end-1c"))
+			source_0_tracked_obj = self.grace_tracker.getTrackedObjByRawIdx(target_raw_idx,0)
+			if(source_0_tracked_obj is not None):
+				self.source_0_target_img = source_0_tracked_obj.copyCroppedImg()
+				self.__regQueryImg(self.source_0_target_img,self.inerested_source_idx)
+				#Visualization
+				self.source_0_target_img_corrected = PIL.ImageTk.PhotoImage(image = PIL.Image.fromarray(cv2.cvtColor(self.source_0_target_img, cv2.COLOR_BGR2RGB)))
+				self.source_0_target_img_canvas.itemconfig(self.source_0_target_img_container,image=self.source_0_target_img_corrected)
+			else:
+				LOGGER.warning("Failed to retrieve the tracked object corresponding to the raw idx %d." % (target_raw_idx))
+				self.__regQueryImg(None,self.inerested_source_idx)#Clear target reg
+		except Exception as e:
+			print(e)
+			self.__regQueryImg(None,self.inerested_source_idx)#Clear target reg
 
 	def __regQueryImg(self, query_img , souorce_idx = 0):
 		#Register new query target
@@ -285,11 +289,6 @@ class GraceAttention:
 	def __configureGraceATTN(self):
 		if(self.is_gaze_averting == False):
 			#Do normal tracking
-			#text state display
-			try:
-				self.stateText.config(text = self.tracking_state_text)
-			except Exception as e:
-				LOGGER.debug(e)
 			#choose target
 			if( self.attn_id_now is not None ):
 				try:
@@ -299,7 +298,7 @@ class GraceAttention:
 					LOGGER.error(e)
 		else:
 			#Look at aversion target
-			self.stateText.config(text = self.aversion_state_text)
+			self.aversionStateText.config(text = self.averting_text)
 			LOGGER.debug("Gaze Averting.")
 			self.__publishGazeAversionTarget()
 			try:
@@ -307,35 +306,63 @@ class GraceAttention:
 			except Exception as e:
 				LOGGER.error(e)
 
-	def enableAversion(self):
-		#Setup the first time stamp for aversion
-		self.__setupAversionTime(time.time())
-		#Enable the aversion mechanism
-		self.aversion_enabled = True
-			
-	def disableAversion(self):
-		#Disable the aversion mechanism
-		self.aversion_enabled = False
+	def __toggleAversion(self):
+		if(self.aversion_enabled_tk.get()):
+			#Setup the first time stamp for aversion
+			self.aversion_enabled = True
+			self.__setupAversionTime(time.time())
+			LOGGER.info("Aversion Enabled.")
+		else:
+			#Disable the aversion mechanism
+			self.aversion_enabled = False
+			LOGGER.info("Aversion Disabled.")
 
 	def __aversionThread(self):
 		rate = rospy.Rate(self.aversion_thread_rate)
 		while(True):
 			if(self.aversion_enabled):
 				t = time.time()
+
 				if(self.is_gaze_averting == False):
 					if(t >= self.gaze_aversion_start_time):
 						#Create a new aversion target
 						self.__createGazeAversionTarget()
 						#Indicate the averting state
 						self.is_gaze_averting = True
+					else:
+						#text state display
+						try:
+							self.aversionStateText.config(
+								text = self.tracking_text + "Next aversion in " + f"{max(0,self.gaze_aversion_start_time - t):.2f}")
+						except Exception as e:
+							LOGGER.debug(e)
 				else:
 					if(t >= self.gaze_aversion_end_time):
 						#Stop the current averting act
 						self.is_gaze_averting = False
 						#Decide the timing for the next aversion
 						self.__setupAversionTime(t)
+
+
+				if(self.is_gaze_averting):
+					#text state display
+					try:
+						self.aversionStateText.config(
+							text = self.averting_text + f"{max(0,self.gaze_aversion_end_time - t):.2f}")
+					except Exception as e:
+						LOGGER.debug(e)
+
+
+
 			else:
 				self.is_gaze_averting = False
+				#text state display
+				try:
+					self.aversionStateText.config(
+						text = self.tracking_text + no_aversion_text)
+				except Exception as e:
+					LOGGER.debug(e)
+
 
 			rate.sleep()
 
@@ -401,14 +428,27 @@ class GraceAttention:
 
 					#Setup the next nodding time
 					self.__setupNoddingTime(t)
+				else:
+					try:
+						self.noddingStateText.config(text=self.pend_nod_text + f"{max(0,self.nodding_time - t):.2f}")
+					except Exception as e:
+						print(e)
+			else:
+				try:
+					self.noddingStateText.config(text=self.no_nod_text)
+				except Exception as e:
+					print(e)
+			
 			rate.sleep()
 
-	def enableNodding(self):
-		self.__setupNoddingTime(time.time())
-		self.nodding_enabled = True
-
-	def disableNodding(self):
-		self.nodding_enabled = False
+	def __toggleNodding(self):
+		if(self.nodding_enabled_tk.get()):
+			self.nodding_enabled = True
+			self.__setupNoddingTime(time.time())
+			LOGGER.info("Nodding Enabled.")
+		else:
+			self.nodding_enabled = False
+			LOGGER.info("Nodding Disabled.")
 
 	def __setupNoddingTime(self, ref_time):
 		#A minimal interval between two nodding
