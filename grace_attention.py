@@ -91,12 +91,20 @@ class GraceAttention:
 	aversion_target_id = "gaze_aversion_target"
 	aversion_loc_range = [0.1,0.3]
 	aversion_mean_interval = 10#seconds
-	aversion_duration_range = [1,5]#seconds
+	aversion_duration_range = [1,2]#seconds
+	aversion_minimal_interval = 3.0#Seconds
 	aversion_thread_rate = 5#Hz
 	aversion_state_text = "Averting"
 
 	#Nodding
-
+	hr_head_gesture_topic = "/hr/animation/set_animation"
+	hr_nod_type_string = "nod_Short"
+	hr_nod_variants_range = [1,7] #8 and 9 use lower case "s" in SHORT
+	hr_nod_magnitude_range = [0.25,1.0]
+	nodding_enabled = False
+	nodding_mean_interval = 12#Seconds
+	nodding_minimal_interval = 3.0#Seconds
+	noding_thread_rate = 5#Hz
 
 
 
@@ -118,6 +126,7 @@ class GraceAttention:
 		self.hr_face_target_pub = rospy.Publisher(self.hr_face_target_topic, hr_msgs.msg.Target, queue_size=self.topic_queue_size)
 		self.target_person_pub = rospy.Publisher(self.target_person_topic, hr_msgs.msg.Person, queue_size=self.topic_queue_size)
 		self.accompanying_frame_pub = rospy.Publisher(self.target_img_topic, sensor_msgs.msg.Image, queue_size=self.topic_queue_size)
+		self.hr_head_gesture_pub = rospy.Publisher(self.hr_head_gesture_topic, hr_msgs.msg.SetAnimation, queue_size=self.topic_queue_size)
 
 		self.dynamic_CAM_cfg_client = dynamic_reconfigure.client.Client(self.hr_CAM_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceCAMCallback)
 		self.dynamic_ATTN_cfg_client = dynamic_reconfigure.client.Client(self.hr_ATTN_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceATTNCallback)
@@ -128,7 +137,6 @@ class GraceAttention:
 			self.__trackingIterationFinishCallBack,
 			[self.hr_img_topic],
 			"0")
-
 
 	def mainThread(self):
 		rate = rospy.Rate(self.main_thread_rate)
@@ -151,32 +159,39 @@ class GraceAttention:
 		self.grace_aversion_thread = threading.Thread(target = self.__aversionThread,daemon = False)
 		self.grace_aversion_thread.start()
 
+		#Start the nodding thread
+		self.grace_nodding_thread = threading.Thread(target= self.__noddingThread, daemon= False)
+		self.grace_nodding_thread.start()
+
 		#Create the target reg text input gui
-		self.target_reg_thread = threading.Thread(target = self.__targetRegGui,daemon = False)
+		self.target_reg_thread = threading.Thread(target = self.__targetATTNGui,daemon = False)
 		self.target_reg_thread.start()
 
 		#Start main thread
 		self.mainThread()
 
-	def __TargetRegGuiClose(self):
+	def __TargetATTNGuiClose(self):
 		self.target_reg_frame.destroy()
 
-	def __targetRegGui(self):
+	def __targetATTNGui(self):
 		#Frame
 		self.target_reg_frame = Tk()
 		self.target_reg_frame.title("ATTN Target Reg")
 		self.target_reg_frame.geometry('900x450')
+
 		#Text box
 		self.target_reg_input = Text(self.target_reg_frame,
                    height = 5,
                    width = 20)
 		self.target_reg_input.pack()
+
 		#Button Creation
 		printButton = Button(self.target_reg_frame,
 								text = "REG", 
 								command = self.targetRegCallback)
 		printButton.pack()
 
+		#Aversion
 		enableAversionButton = Button(self.target_reg_frame,
 								text = "ENABLE AVERSION", 
 								command = self.enableAversion)
@@ -187,15 +202,24 @@ class GraceAttention:
 								command = self.disableAversion)
 		disableAversionButton.pack()
 
+		#State
 		self.stateText = Label(self.target_reg_frame, text = self.tracking_state_text)
 		self.stateText.pack()
 
-		# writeBagButton = Button(self.target_reg_frame,
-		# 						text = "WRITE BAG", 
-		# 						command = self.__writeBag)
-		# writeBagButton.pack()
+		#Nodding
+		enableNoddingButton = Button(self.target_reg_frame,
+								text = "ENABLE NODDING", 
+								command = self.enableNodding)
+		enableNoddingButton.pack()
 
-		# Label Creation
+
+		disableNoddingButton = Button(self.target_reg_frame,
+								text = "Disable NODDING", 
+								command = self.disableNodding())
+		disableNoddingButton.pack()
+
+
+		#Image of target person
 		lbl = Label(self.target_reg_frame, text = "")
 		lbl.pack()
 		#Room for image visualization
@@ -317,9 +341,10 @@ class GraceAttention:
 
 	def __setupAversionTime(self, ref_time):
 		#Start time of aversion
-		self.gaze_aversion_start_time = ref_time + numpy.random.exponential(self.aversion_mean_interval)
+		self.gaze_aversion_start_time = ref_time + max(self.aversion_minimal_interval,numpy.random.exponential(self.aversion_mean_interval))
 		#Duration of aversion
 		dur = numpy.random.uniform(self.aversion_duration_range[0],self.aversion_duration_range[1])
+		#End time of aversion
 		self.gaze_aversion_end_time = self.gaze_aversion_start_time + dur
 		LOGGER.info("New aversion in %f seconds." % (self.gaze_aversion_start_time - ref_time))
 
@@ -358,6 +383,36 @@ class GraceAttention:
 			new_point.z = 2 * (numpy.random.binomial(1, 0.5) - 0.5) * numpy.random.uniform(self.aversion_loc_range[0],self.aversion_loc_range[1])
 			
 			self.gaze_aversion_target_msg.body.location = new_point
+
+	def __noddingThread(self):
+		rate = rospy.Rate(self.noding_thread_rate)
+		while(True):
+			if(self.nodding_enabled):
+				t = time.time()
+				#Do nodding
+				if(t>= self.nodding_time):
+					#Compose and publish a nodding command
+					nodding_gesture_cmd = hr_msgs.msg.SetAnimation()
+					nodding_gesture_cmd.name = self.hr_nod_type_string + str(numpy.random.randint(self.hr_nod_variants_range[0],self.hr_nod_variants_range[1]+1))
+					nodding_gesture_cmd.repeat = 1
+					nodding_gesture_cmd.speed = 1.0
+					nodding_gesture_cmd.magnitude = numpy.random.uniform(self.hr_nod_magnitude_range[0],self.hr_nod_magnitude_range[1])
+					self.hr_head_gesture_pub.publish(nodding_gesture_cmd)
+
+					#Setup the next nodding time
+					self.__setupNoddingTime(t)
+			rate.sleep()
+
+	def enableNodding(self):
+		self.__setupNoddingTime(time.time())
+		self.nodding_enabled = True
+
+	def disableNodding(self):
+		self.nodding_enabled = False
+
+	def __setupNoddingTime(self, ref_time):
+		#A minimal interval between two nodding
+		self.nodding_time = ref_time + max(self.nodding_minimal_interval, numpy.random.exponential(self.nodding_mean_interval))
 
 	def __writeBag(self):
 		self.people_debug_bag.close()
