@@ -82,9 +82,10 @@ class GraceAttention:
 	target_person_topic = "/grace_proj/target_person"
 	target_img_topic = "/grace_proj/target_img"
 	no_target_string = "None"
-
+	manual_face_target_rate = 5#Hz
 
 	#Aversion
+	toggle_aversion_topic = "/grace_proj/toggle_aversion"
 	aversion_enabled = False #Whether the random aversion is enabled
 	is_gaze_averting = False #Whether it's averting at the moment
 	gaze_aversion_start_time = None
@@ -101,6 +102,7 @@ class GraceAttention:
 	averting_text = "Averting for"
 
 	#Nodding
+	toggle_nodding_topic = "/grace_proj/toggle_nodding"
 	nodding_enabled = False
 	hr_head_gesture_topic = "/hr/animation/set_animation"
 	hr_nod_type_string = "nod_Short"
@@ -112,13 +114,14 @@ class GraceAttention:
 	pend_nod_text = "Next nod in "
 	no_nod_text = "Nodding disabled."
 
-
-
 	#Miscellaneous	
 	main_thread  = None
 	main_thread_rate = 2 #Hz
 
 	def __init__(self):
+		# self.__targetATTNGui()
+
+
 		#Thread safety
 		self.people_msg_lock = threading.Lock()
 
@@ -135,9 +138,11 @@ class GraceAttention:
 		self.hr_head_gesture_pub = rospy.Publisher(self.hr_head_gesture_topic, hr_msgs.msg.SetAnimation, queue_size=self.topic_queue_size)
 		self.stop_pub = rospy.Publisher(self.stop_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
 		self.stop_sub = rospy.Subscriber(self.stop_topic, std_msgs.msg.Bool, self.__stopMsgCallback, queue_size=self.topic_queue_size)
+		self.toggle_aversion_sub = rospy.Subscriber(self.toggle_aversion_topic, std_msgs.msg.Bool, self.__toggleAversionMsgCallback, queue_size=self.topic_queue_size)
+		self.toggle_nodding_sub = rospy.Subscriber(self.toggle_nodding_topic, std_msgs.msg.Bool, self.__toggleNoddingMsgCallback, queue_size=self.topic_queue_size)
 		self.dynamic_CAM_cfg_client = dynamic_reconfigure.client.Client(self.hr_CAM_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceCAMCallback)
 		self.dynamic_ATTN_cfg_client = dynamic_reconfigure.client.Client(self.hr_ATTN_cfg_server, timeout=self.dynamic_reconfig_request_timeout, config_callback=self.__configureGraceATTNCallback)
-		
+
 		#Tracking module initialization
 		self.grace_tracker = grace_track.GraceTracker(
 			self.__trackingIterationStartCallBack,
@@ -145,7 +150,7 @@ class GraceAttention:
 			[self.hr_img_topic],
 			"0")
 
-	def mainThread(self):
+	def __mainThread(self):
 		rate = rospy.Rate(self.main_thread_rate)
 		while(True):
 			self.__configureGraceATTN()
@@ -162,6 +167,7 @@ class GraceAttention:
 		#Start tracking thread (note that without registering a query image no actual re-indentification would be performed)
 		self.grace_tracker.startTracking(self.tracker_polling_rate, False, annotate)#Visualize at attention module level
 
+
 		#Start the gaze aversion thread
 		self.grace_aversion_thread = threading.Thread(target = self.__aversionThread,daemon = False)
 		self.grace_aversion_thread.start()
@@ -174,8 +180,12 @@ class GraceAttention:
 		self.target_reg_thread = threading.Thread(target = self.__targetATTNGui,daemon = False)
 		self.target_reg_thread.start()
 
+		#External face target
+		self.face_target_thread = threading.Thread(target = self.__manualFaceTargetThread,daemon = False)
+		self.face_target_thread.start()
+
 		#Start main thread
-		self.mainThread()
+		self.__mainThread()
 
 	def __TargetATTNGuiClose(self):
 		self.attention_ui_frame.destroy()
@@ -189,10 +199,19 @@ class GraceAttention:
 		#STOP
 		stop_btn = Button(self.attention_ui_frame,
 							text = "STOP", 
-							command = self.__stopCallback)
+							command = self.__stopBtnCallback)
 		# stop_btn.pack()
 		stop_btn.place(y=50, x=50)
 
+		#Attention enabled state
+		self.attention_enabled_tk = BooleanVar()
+		enable_attention = Checkbutton(
+			self.attention_ui_frame,
+			text = "Enable Attention", 
+			variable= self.attention_enabled_tk,
+			onvalue = True, offvalue = False,
+			command = self.__toggleGraceAttentionBtnCallback)
+		enable_attention.place(y=50, x= 200)
 
 		#Target Selection
 		self.target_reg_input = Text(
@@ -200,13 +219,13 @@ class GraceAttention:
 			height = 2,
 			width = 10)
 		self.target_reg_input.pack()
-		self.target_reg_input.place(y=50, x= 300)
+		self.target_reg_input.place(y=50, x= 650)
 
 		confirm_target_reg = Button(self.attention_ui_frame,
 								text = "REG", 
-								command = self.targetRegCallback)
+								command = self.__targetRegCallback)
 		# confirm_target_reg.pack()
-		confirm_target_reg.place(y=50, x= 200)
+		confirm_target_reg.place(y=50, x= 550)
 
 		#Aversion: enable, disable, state
 		self.aversion_enabled_tk = BooleanVar()
@@ -215,7 +234,7 @@ class GraceAttention:
 			text = "Enable Aversion", 
 			variable= self.aversion_enabled_tk,
 			onvalue = True, offvalue = False,
-			command = self.__toggleAversion)
+			command = self.__toggleAversionBtnCallback)
 		# enableAversion.pack()
 		enableAversion.place(y=150, x=50)
 
@@ -230,7 +249,7 @@ class GraceAttention:
 			text = "ENABLE Nodding", 
 			variable= self.nodding_enabled_tk,
 			onvalue = True, offvalue = False,
-			command = self.__toggleNodding)
+			command = self.__toggleNoddingBtnCallback)
 		# enableNodding.pack()
 		enableNodding.place(y=250, x=50)
 		
@@ -254,26 +273,45 @@ class GraceAttention:
 		# self.source_0_img_canvas.pack()
 		self.source_0_img_canvas.place(y=350, x=50)
 			
+		#Stop all local functions in the beginning
+		self.__stopAllLocal()
 
 		#Blocks
 		self.attention_ui_frame.mainloop()
 
-	def __stopCallback(self):
+	def __stopBtnCallback(self):
+		#Broadcast a stop signal, which acts on the program itself as well
 		self.stop_pub.publish(std_msgs.msg.Bool(True))
+		
+	def __stopAllLocal(self):
+		try:
+			self.__regQueryImg(None,self.inerested_source_idx)
+			#Stop Grace attention
+			self.attention_enabled_tk.set(False)
+			self.__toggleGraceAttentionBtnCallback()
+			#Stop aversion
+			self.aversion_enabled_tk.set(False)
+			self.__toggleAversionBtnCallback()
+			#Stop nodding
+			self.nodding_enabled_tk.set(False)
+			self.__toggleNoddingBtnCallback()
+			LOGGER.info("Everything stopped.")
+		except Exception as e:
+			LOGGER.error(e)
 
 	def __stopMsgCallback(self, msg):
 		if(msg.data):
-			#Stop tracking
-			self.__regQueryImg(None,self.inerested_source_idx)
-			#Stop aversion
-			self.aversion_enabled_tk.set(False)
-			self.__toggleAversion()
-			#Stop nodding
-			self.nodding_enabled_tk.set(False)
-			self.__toggleNodding()
-			LOGGER.error("Everything stopped.")
+			self.__stopAllLocal()
 
-	def targetRegCallback(self):
+	def __toggleNoddingMsgCallback(self, msg):
+		self.nodding_enabled_tk.set(msg.data)
+		self.__toggleNoddingBtnCallback()
+
+	def __toggleAversionMsgCallback(self, msg):
+		self.aversion_enabled_tk.set(msg.data)
+		self.__toggleAversionBtnCallback()
+
+	def __targetRegCallback(self):
 		try:
 			target_raw_idx = int(self.target_reg_input.get(1.0, "end-1c"))
 			source_0_tracked_obj = self.grace_tracker.getTrackedObjByRawIdx(target_raw_idx,0)
@@ -332,7 +370,7 @@ class GraceAttention:
 
 	def __configureGraceATTN(self):
 		if(self.is_gaze_averting == False):
-			#Do normal tracking
+			#Attend to the target person normally
 			#choose target
 			if( self.attn_id_now is not None ):
 				try:
@@ -350,7 +388,35 @@ class GraceAttention:
 			except Exception as e:
 				LOGGER.error(e)
 
-	def __toggleAversion(self):
+	def __manualFaceTargetThread(self):
+		rate = rospy.Rate(self.manual_face_target_rate)
+
+		fake_target_in_space = hr_msgs.msg.Target()
+		fake_target_in_space.x = 1.5
+		fake_target_in_space.y = 0
+		fake_target_in_space.x = 1.5
+		fake_target_in_space.speed = 1.0
+
+		while(True):
+			try:
+				if(not self.attention_enabled_tk.get()):
+					#When automatic grace attention is disabled, we manually specify a fake face target
+					#to make grace look disengaged
+					self.hr_face_target_pub.publish(fake_target_in_space)
+			except Exception as e:
+				LOGGER.debug(e)
+
+			rate.sleep()
+
+	def __toggleGraceAttentionBtnCallback(self):
+		#Toggle the attention functionality of Grace via dynamic reconfig
+		try:
+			self.dynamic_ATTN_cfg_client.update_configuration({"enable_flag":self.attention_enabled_tk.get()})
+			LOGGER.info("Grace attention flag set to %s." % (self.attention_enabled_tk.get()))
+		except Exception as e:
+			LOGGER.error(e)
+
+	def __toggleAversionBtnCallback(self):
 		if(self.aversion_enabled_tk.get()):
 			#Setup the first time stamp for aversion
 			self.aversion_enabled = True
@@ -482,7 +548,7 @@ class GraceAttention:
 			
 			rate.sleep()
 
-	def __toggleNodding(self):
+	def __toggleNoddingBtnCallback(self):
 		if(self.nodding_enabled_tk.get()):
 			self.nodding_enabled = True
 			self.__setupNoddingTime(time.time())
