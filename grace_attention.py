@@ -18,7 +18,11 @@ import cv2
 from copy import deepcopy
 from .Yolov5_StrongSORT_OSNet import grace_track
 from .Yolov5_StrongSORT_OSNet.yolov5.utils.loggers import LOGGER
-from MOS_HSEmotion import grace_emotion_attention
+
+# from MOS_HSEmotion import grace_emotion_attention
+
+import grace_attn_msgs.msg
+
 import os
 
 POSE_CHAIN = [
@@ -83,8 +87,9 @@ class GraceAttention:
 	# people_debug_bag = None
 	tracker_polling_rate = 10#Hz
 	inerested_source_idx = 0#Assume we only use source 0
-	target_person_topic = "/grace_proj/target_person"
-	target_img_topic = "/grace_proj/target_img"
+
+	#For further processing the tracking result 
+	tracking_reid_result_topic = "/grace_proj/tracking_reid_output"
 	no_target_string = "None"
 
 	#Aversion
@@ -123,10 +128,10 @@ class GraceAttention:
 	# TK
 	#######################
 	# Facial Emotion & Attention
-	emotion_attention_target_person_input_topic = "/grace_proj/target_person"
-	emotion_attention_accompanying_frame_input_topic = "/grace_proj/target_img"
-	emotion_attention_annotated_frame_output_topic = "/grace_proj/emotion_attention_annotated_frame_output_topic"
-	emotion_attention_target_person_output_topic = "/grace_proj/emotion_attention_target_person_output_topic"
+	# emotion_attention_target_person_input_topic = "/grace_proj/target_person"
+	# emotion_attention_accompanying_frame_input_topic = "/grace_proj/target_img"
+	# emotion_attention_annotated_frame_output_topic = "/grace_proj/emotion_attention_annotated_frame_output_topic"
+	# emotion_attention_target_person_output_topic = "/grace_proj/emotion_attention_target_person_output_topic"
 
 	#Miscellaneous	
 	main_thread  = None
@@ -144,9 +149,9 @@ class GraceAttention:
 		# rospy.Subscriber(self.hr_img_topic, sensor_msgs.msg.Image,self.__chestCamRGBImgCallback, queue_size=self.topic_queue_size)
 		self.hr_people_pub = rospy.Publisher(self.hr_people_perception_topic, hr_msgs.msg.People, queue_size=self.topic_queue_size)
 		self.hr_face_target_pub = rospy.Publisher(self.hr_face_target_topic, hr_msgs.msg.Target, queue_size=self.topic_queue_size)
-		self.target_person_pub = rospy.Publisher(self.target_person_topic, hr_msgs.msg.Person, queue_size=self.topic_queue_size)
-		self.accompanying_frame_pub = rospy.Publisher(self.target_img_topic, sensor_msgs.msg.Image, queue_size=self.topic_queue_size)
 		self.hr_head_gesture_pub = rospy.Publisher(self.hr_head_gesture_topic, hr_msgs.msg.SetAnimation, queue_size=self.topic_queue_size)
+		self.tracking_reid_output_pub = rospy.Publisher(self.tracking_reid_result_topic, grace_attn_msgs.msg.TrackingReIDResult, queue_size=self.topic_queue_size)
+		
 
 		self.stop_pub = rospy.Publisher(self.stop_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
 		self.toggle_attention_pub = rospy.Publisher(self.toggle_attention_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
@@ -185,21 +190,21 @@ class GraceAttention:
 		#######################
 		# TK
 		#######################
-		self.grace_emotion_attention_modules_pipepline = grace_emotion_attention.Pipeline()
-		self.emotion_attention_target_person_sub = rospy.Subscriber(self.emotion_attention_target_person_input_topic, 
-																	hr_msgs.msg.Person, 
-																	self.__emotionAttentionTargetPersonMsgCallback, 
-																	queue_size=self.topic_queue_size)
-		self.emotion_attention_accompanying_frame_sub = rospy.Subscriber(self.emotion_attention_accompanying_frame_input_topic, 
-																		 sensor_msgs.msg.Image,
-																		 self.__emotionAttentionAccompanyingFrameMsgCallback, 
-																		 queue_size=self.topic_queue_size)
-		self.emotion_attention_annotated_frame_pub = rospy.Publisher(self.emotion_attention_annotated_frame_output_topic, 
-																	 sensor_msgs.msg.Image, 
-																	 queue_size=self.topic_queue_size)
-		self.emotion_attention_target_person_pub = rospy.Publisher(self.emotion_attention_target_person_output_topic, 
-																   hr_msgs.msg.Person, 
-																   queue_size=self.topic_queue_size)
+		# self.grace_emotion_attention_modules_pipepline = grace_emotion_attention.Pipeline()
+		# self.emotion_attention_target_person_sub = rospy.Subscriber(self.emotion_attention_target_person_input_topic, 
+		# 															hr_msgs.msg.Person, 
+		# 															self.__emotionAttentionTargetPersonMsgCallback, 
+		# 															queue_size=self.topic_queue_size)
+		# self.emotion_attention_accompanying_frame_sub = rospy.Subscriber(self.emotion_attention_accompanying_frame_input_topic, 
+		# 																 sensor_msgs.msg.Image,
+		# 																 self.__emotionAttentionAccompanyingFrameMsgCallback, 
+		# 																 queue_size=self.topic_queue_size)
+		# self.emotion_attention_annotated_frame_pub = rospy.Publisher(self.emotion_attention_annotated_frame_output_topic, 
+		# 															 sensor_msgs.msg.Image, 
+		# 															 queue_size=self.topic_queue_size)
+		# self.emotion_attention_target_person_pub = rospy.Publisher(self.emotion_attention_target_person_output_topic, 
+		# 														   hr_msgs.msg.Person, 
+		# 														   queue_size=self.topic_queue_size)
 
 	def __mainThread(self):
 		rate = rospy.Rate(self.main_thread_rate)
@@ -222,8 +227,8 @@ class GraceAttention:
 		# TK
 		#######################
 		#Start the emotion and attention thread
-		self.grace_emotion_attention_thread = threading.Thread(target= self.__emotionAttentionThread, daemon= False)
-		self.grace_emotion_attention.start()
+		# self.grace_emotion_attention_thread = threading.Thread(target= self.__emotionAttentionThread, daemon= False)
+		# self.grace_emotion_attention.start()
 
 		#Start the gaze aversion thread
 		self.grace_aversion_thread = threading.Thread(target = self.__aversionThread, daemon = False)
@@ -541,14 +546,14 @@ class GraceAttention:
 	##############
 	# TK
 	##############
-	def __emotionAttentionThread(self):
-		while(True):
-			target_person_msg = hr_msgs.msg.Person()
-			if target_person_msg.id == self.no_target_string:
-				time.sleep(1)
-			else:
+	# def __emotionAttentionThread(self):
+	# 	while(True):
+	# 		target_person_msg = hr_msgs.msg.Person()
+	# 		if target_person_msg.id == self.no_target_string:
+	# 			time.sleep(1)
+	# 		else:
 	
-	def __emotionAttentionTargetPersonMsgCallback(self, msg):
+	# def __emotionAttentionTargetPersonMsgCallback(self, msg):
 
 				
 
@@ -634,14 +639,19 @@ class GraceAttention:
 		#Publish relevant information for the upcoming expression and gaze detection
 		#Image frame used
 		img_used = self.cv_bridge.cv2_to_imgmsg(raw_frames[self.inerested_source_idx])
-		self.accompanying_frame_pub.publish(img_used)
 		#People msg
 		target_person_msg = hr_msgs.msg.Person()
 		if(self.target_person_msg is None):
 			target_person_msg.id = self.no_target_string
 		else:
 			target_person_msg = deepcopy(self.target_person_msg)
-		self.target_person_pub.publish(target_person_msg)
+		#Comebine them into our custom message type
+		tracking_reid_msg_to_pub = grace_attn_msgs.msg.TrackingReIDResult()
+		tracking_reid_msg_to_pub.accompanying_frame = img_used
+		tracking_reid_msg_to_pub.target_person = target_person_msg
+		#Publish for further processing
+		self.tracking_reid_output_pub.publish(tracking_reid_msg_to_pub)
+
 
 		if(self.attention_vis):
 			#Visualize the annotated frame in gui

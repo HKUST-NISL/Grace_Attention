@@ -1,0 +1,2 @@
+sensor_msgs/Image accompanying_frame
+hr_msgs/Person target_person
