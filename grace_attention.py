@@ -61,7 +61,8 @@ class GraceAttention:
 	#Camera Angling
 	dynamic_reconfig_request_timeout = 0.5
 	hr_CAM_cfg_server = "/hr/perception/camera_angle"
-	grace_chest_cam_motor_angle = 0.15
+	#grace_chest_cam_motor_angle = 0.15
+	grace_chest_cam_motor_angle = 0.55
 
 	#Tracking & Gaze Attention
 	attention_enabled = False
@@ -520,15 +521,15 @@ class GraceAttention:
 
 	def __trackingIterationFinishCallBack(
 		self, 
+		is_target_tracked,
 		tracking_results, 
 		target_idx_among_tracked_obj, 
 		raw_frames, 
 		annotated_frames):		
 		#For now we assume only one of the sources are of interest
 		
-		#Whether we actually have a target identified and tracked 
-		has_target_from_tracking_reid = target_idx_among_tracked_obj[self.inerested_source_idx] is not None
-		
+		print(is_target_tracked)
+
 		if(
 			self.attention_enabled
 			and
@@ -594,9 +595,12 @@ class GraceAttention:
 		img_used = self.cv_bridge.cv2_to_imgmsg(raw_frames[self.inerested_source_idx])
 		#Bounding box of the target person, available when tracking-reid is working
 		target_person_bbox = []
-		if(has_target_from_tracking_reid):
-			target_person_bbox = tracking_results[self.inerested_source_idx][target_idx_among_tracked_obj[self.inerested_source_idx]].getBBoxMsgType()	
-		#People msg - available only when skeleton is found
+		if(is_target_tracked):
+			try:
+				target_person_bbox = tracking_results[self.inerested_source_idx][target_idx_among_tracked_obj[self.inerested_source_idx]].getBBoxMsgType()	
+			except Exception as e:
+				print(e)
+		# People msg - available only when skeleton is found
 		target_person_msg = hr_msgs.msg.Person()
 		if(self.target_person_msg is None):
 			target_person_msg.id = self.no_target_string
