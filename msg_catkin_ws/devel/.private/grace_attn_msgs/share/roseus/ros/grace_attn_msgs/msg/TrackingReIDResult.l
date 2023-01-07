@@ -14,20 +14,24 @@
   (ros::roseus-add-msgs "hr_msgs"))
 (if (not (find-package "SENSOR_MSGS"))
   (ros::roseus-add-msgs "sensor_msgs"))
+(if (not (find-package "STD_MSGS"))
+  (ros::roseus-add-msgs "std_msgs"))
 
 
 (defclass grace_attn_msgs::TrackingReIDResult
   :super ros::object
-  :slots (_accompanying_frame _target_person ))
+  :slots (_accompanying_frame _bounding_box _target_person ))
 
 (defmethod grace_attn_msgs::TrackingReIDResult
   (:init
    (&key
     ((:accompanying_frame __accompanying_frame) (instance sensor_msgs::Image :init))
+    ((:bounding_box __bounding_box) ())
     ((:target_person __target_person) (instance hr_msgs::Person :init))
     )
    (send-super :init)
    (setq _accompanying_frame __accompanying_frame)
+   (setq _bounding_box __bounding_box)
    (setq _target_person __target_person)
    self)
   (:accompanying_frame
@@ -37,6 +41,13 @@
      (progn
        (if __accompanying_frame (setq _accompanying_frame (car __accompanying_frame)))
        _accompanying_frame)))
+  (:bounding_box
+   (&rest __bounding_box)
+   (if (keywordp (car __bounding_box))
+       (send* _bounding_box __bounding_box)
+     (progn
+       (if __bounding_box (setq _bounding_box (car __bounding_box)))
+       _bounding_box)))
   (:target_person
    (&rest __target_person)
    (if (keywordp (car __target_person))
@@ -49,6 +60,8 @@
    (+
     ;; sensor_msgs/Image _accompanying_frame
     (send _accompanying_frame :serialization-length)
+    ;; std_msgs/Int64[] _bounding_box
+    (apply #'+ (send-all _bounding_box :serialization-length)) 4
     ;; hr_msgs/Person _target_person
     (send _target_person :serialization-length)
     ))
@@ -58,6 +71,11 @@
               (make-string-output-stream (send self :serialization-length)))))
      ;; sensor_msgs/Image _accompanying_frame
        (send _accompanying_frame :serialize s)
+     ;; std_msgs/Int64[] _bounding_box
+     (write-long (length _bounding_box) s)
+     (dolist (elem _bounding_box)
+       (send elem :serialize s)
+       )
      ;; hr_msgs/Person _target_person
        (send _target_person :serialize s)
      ;;
@@ -66,16 +84,24 @@
    (buf &optional (ptr- 0))
    ;; sensor_msgs/Image _accompanying_frame
      (send _accompanying_frame :deserialize buf ptr-) (incf ptr- (send _accompanying_frame :serialization-length))
+   ;; std_msgs/Int64[] _bounding_box
+   (let (n)
+     (setq n (sys::peek buf ptr- :integer)) (incf ptr- 4)
+     (setq _bounding_box (let (r) (dotimes (i n) (push (instance std_msgs::Int64 :init) r)) r))
+     (dolist (elem- _bounding_box)
+     (send elem- :deserialize buf ptr-) (incf ptr- (send elem- :serialization-length))
+     ))
    ;; hr_msgs/Person _target_person
      (send _target_person :deserialize buf ptr-) (incf ptr- (send _target_person :serialization-length))
    ;;
    self)
   )
 
-(setf (get grace_attn_msgs::TrackingReIDResult :md5sum-) "23bd691bb2b76cf204aca0c66b104aa1")
+(setf (get grace_attn_msgs::TrackingReIDResult :md5sum-) "26b9b313443164cd67c804c21e7d603c")
 (setf (get grace_attn_msgs::TrackingReIDResult :datatype-) "grace_attn_msgs/TrackingReIDResult")
 (setf (get grace_attn_msgs::TrackingReIDResult :definition-)
       "sensor_msgs/Image accompanying_frame
+std_msgs/Int64[] bounding_box #[width_1,height_1,width_2,height_2]
 hr_msgs/Person target_person
 ================================================================================
 MSG: sensor_msgs/Image
@@ -123,6 +149,9 @@ time stamp
 #Frame this data is associated with
 string frame_id
 
+================================================================================
+MSG: std_msgs/Int64
+int64 data
 ================================================================================
 MSG: hr_msgs/Person
 std_msgs/Header header
@@ -216,6 +245,6 @@ sensor_msgs/RegionOfInterest bounding_box
 
 
 
-(provide :grace_attn_msgs/TrackingReIDResult "23bd691bb2b76cf204aca0c66b104aa1")
+(provide :grace_attn_msgs/TrackingReIDResult "26b9b313443164cd67c804c21e7d603c")
 
 

@@ -1,0 +1,13 @@
+[31m[1mCMake Error[0m at /opt/ros/noetic/share/catkin/cmake/assert.cmake:20 (message):
+
+
+  Assertion failed: file
+  '/home/yifan/Dropbox/Grace/Grace_Project/Grace_Attention/msg_catkin_ws/src/grace_attn_msgs/msg/EmotionAttentionResult.msg'
+  does not exist.  Message: message file not found
+
+[36mCall Stack (most recent call first):[0m
+  /opt/ros/noetic/share/genmsg/cmake/genmsg-extras.cmake:113 (assert_file_exists)
+  CMakeLists.txt:53 (add_message_files)
+
+
+make: *** [Makefile:922: cmake_check_build_system] Error 1

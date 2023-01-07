@@ -139,7 +139,6 @@ class GraceAttention:
 		self.hr_head_gesture_pub = rospy.Publisher(self.hr_head_gesture_topic, hr_msgs.msg.SetAnimation, queue_size=self.topic_queue_size)
 		self.tracking_reid_output_pub = rospy.Publisher(self.tracking_reid_result_topic, grace_attn_msgs.msg.TrackingReIDResult, queue_size=self.topic_queue_size)
 		
-
 		self.stop_pub = rospy.Publisher(self.stop_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
 		self.toggle_attention_pub = rospy.Publisher(self.toggle_attention_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
 		self.toggle_aversion_pub = rospy.Publisher(self.toggle_aversion_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
@@ -526,6 +525,10 @@ class GraceAttention:
 		raw_frames, 
 		annotated_frames):		
 		#For now we assume only one of the sources are of interest
+		
+		#Whether we actually have a target identified and tracked 
+		has_target_from_tracking_reid = target_idx_among_tracked_obj[self.inerested_source_idx] is not None
+		
 		if(
 			self.attention_enabled
 			and
@@ -536,7 +539,7 @@ class GraceAttention:
 			self.tracking_start_people_msg is not None
 			and
 			len(self.tracking_start_people_msg.people) > 0
-		):
+		):		
 			t0 = time.time()
 		
 			#Check which person detected best-matches the target found by the tracker
@@ -564,7 +567,8 @@ class GraceAttention:
 
 			sort_idx = numpy.argsort(numpy.array(landmark_matching_score))
 			best_match_idx = sort_idx[-1]
-			if(landmark_matching_score[best_match_idx] > 0):#At least one skeleton points need to fall inside the bounding box
+			if(landmark_matching_score[best_match_idx] > 0):
+				#At least one skeleton points need to fall inside the bounding box
 				best_match_person = self.tracking_start_people_msg.people[best_match_idx]
 
 				#Further annotate the image by drawing pose tree of the matching target
@@ -575,6 +579,7 @@ class GraceAttention:
 				self.attn_id_now = best_match_person.id
 				self.target_person_msg = deepcopy(best_match_person)
 			else:
+				#No skeleton found for target person
 				self.attn_id_now = None
 				self.target_person_msg = None
 		else:
@@ -585,18 +590,24 @@ class GraceAttention:
 		self.tracking_start_people_msg = None
 
 		#Publish relevant information for the upcoming expression and gaze detection
-		#Image frame used
+		#Image frame used - always available
 		img_used = self.cv_bridge.cv2_to_imgmsg(raw_frames[self.inerested_source_idx])
-		#People msg
+		#Bounding box of the target person, available when tracking-reid is working
+		target_person_bbox = []
+		if(has_target_from_tracking_reid):
+			target_person_bbox = tracking_results[self.inerested_source_idx][target_idx_among_tracked_obj[self.inerested_source_idx]].getBBoxMsgType()	
+		#People msg - available only when skeleton is found
 		target_person_msg = hr_msgs.msg.Person()
 		if(self.target_person_msg is None):
 			target_person_msg.id = self.no_target_string
 		else:
-			target_person_msg = deepcopy(self.target_person_msg)
+			target_person_msg = deepcopy(self.target_person_msg)		
 		#Comebine them into our custom message type
 		tracking_reid_msg_to_pub = grace_attn_msgs.msg.TrackingReIDResult()
 		tracking_reid_msg_to_pub.accompanying_frame = img_used
+		tracking_reid_msg_to_pub.bounding_box = target_person_bbox
 		tracking_reid_msg_to_pub.target_person = target_person_msg
+
 		#Publish for further processing
 		self.tracking_reid_output_pub.publish(tracking_reid_msg_to_pub)
 

@@ -11,8 +11,9 @@ const _deserializer = _ros_msg_utils.Deserialize;
 const _arrayDeserializer = _deserializer.Array;
 const _finder = _ros_msg_utils.Find;
 const _getByteLength = _ros_msg_utils.getByteLength;
-let sensor_msgs = _finder('sensor_msgs');
 let hr_msgs = _finder('hr_msgs');
+let sensor_msgs = _finder('sensor_msgs');
+let std_msgs = _finder('std_msgs');
 
 //-----------------------------------------------------------
 
@@ -21,6 +22,7 @@ class TrackingReIDResult {
     if (initObj === null) {
       // initObj === null is a special case for deserialization where we don't initialize fields
       this.accompanying_frame = null;
+      this.bounding_box = null;
       this.target_person = null;
     }
     else {
@@ -29,6 +31,12 @@ class TrackingReIDResult {
       }
       else {
         this.accompanying_frame = new sensor_msgs.msg.Image();
+      }
+      if (initObj.hasOwnProperty('bounding_box')) {
+        this.bounding_box = initObj.bounding_box
+      }
+      else {
+        this.bounding_box = [];
       }
       if (initObj.hasOwnProperty('target_person')) {
         this.target_person = initObj.target_person
@@ -43,6 +51,12 @@ class TrackingReIDResult {
     // Serializes a message object of type TrackingReIDResult
     // Serialize message field [accompanying_frame]
     bufferOffset = sensor_msgs.msg.Image.serialize(obj.accompanying_frame, buffer, bufferOffset);
+    // Serialize message field [bounding_box]
+    // Serialize the length for message field [bounding_box]
+    bufferOffset = _serializer.uint32(obj.bounding_box.length, buffer, bufferOffset);
+    obj.bounding_box.forEach((val) => {
+      bufferOffset = std_msgs.msg.Int64.serialize(val, buffer, bufferOffset);
+    });
     // Serialize message field [target_person]
     bufferOffset = hr_msgs.msg.Person.serialize(obj.target_person, buffer, bufferOffset);
     return bufferOffset;
@@ -54,6 +68,13 @@ class TrackingReIDResult {
     let data = new TrackingReIDResult(null);
     // Deserialize message field [accompanying_frame]
     data.accompanying_frame = sensor_msgs.msg.Image.deserialize(buffer, bufferOffset);
+    // Deserialize message field [bounding_box]
+    // Deserialize array length for message field [bounding_box]
+    len = _deserializer.uint32(buffer, bufferOffset);
+    data.bounding_box = new Array(len);
+    for (let i = 0; i < len; ++i) {
+      data.bounding_box[i] = std_msgs.msg.Int64.deserialize(buffer, bufferOffset)
+    }
     // Deserialize message field [target_person]
     data.target_person = hr_msgs.msg.Person.deserialize(buffer, bufferOffset);
     return data;
@@ -62,8 +83,9 @@ class TrackingReIDResult {
   static getMessageSize(object) {
     let length = 0;
     length += sensor_msgs.msg.Image.getMessageSize(object.accompanying_frame);
+    length += 8 * object.bounding_box.length;
     length += hr_msgs.msg.Person.getMessageSize(object.target_person);
-    return length;
+    return length + 4;
   }
 
   static datatype() {
@@ -73,13 +95,14 @@ class TrackingReIDResult {
 
   static md5sum() {
     //Returns md5sum for a message object
-    return '23bd691bb2b76cf204aca0c66b104aa1';
+    return '26b9b313443164cd67c804c21e7d603c';
   }
 
   static messageDefinition() {
     // Returns full string definition for message
     return `
     sensor_msgs/Image accompanying_frame
+    std_msgs/Int64[] bounding_box #[width_1,height_1,width_2,height_2]
     hr_msgs/Person target_person
     ================================================================================
     MSG: sensor_msgs/Image
@@ -127,6 +150,9 @@ class TrackingReIDResult {
     #Frame this data is associated with
     string frame_id
     
+    ================================================================================
+    MSG: std_msgs/Int64
+    int64 data
     ================================================================================
     MSG: hr_msgs/Person
     std_msgs/Header header
@@ -230,6 +256,16 @@ class TrackingReIDResult {
     }
     else {
       resolved.accompanying_frame = new sensor_msgs.msg.Image()
+    }
+
+    if (msg.bounding_box !== undefined) {
+      resolved.bounding_box = new Array(msg.bounding_box.length);
+      for (let i = 0; i < resolved.bounding_box.length; ++i) {
+        resolved.bounding_box[i] = std_msgs.msg.Int64.Resolve(msg.bounding_box[i]);
+      }
+    }
+    else {
+      resolved.bounding_box = []
     }
 
     if (msg.target_person !== undefined) {

@@ -16,6 +16,7 @@
 #include <ros/message_operations.h>
 
 #include <sensor_msgs/Image.h>
+#include <std_msgs/Int64.h>
 #include <hr_msgs/Person.h>
 
 namespace grace_attn_msgs
@@ -27,10 +28,12 @@ struct TrackingReIDResult_
 
   TrackingReIDResult_()
     : accompanying_frame()
+    , bounding_box()
     , target_person()  {
     }
   TrackingReIDResult_(const ContainerAllocator& _alloc)
     : accompanying_frame(_alloc)
+    , bounding_box(_alloc)
     , target_person(_alloc)  {
   (void)_alloc;
     }
@@ -39,6 +42,9 @@ struct TrackingReIDResult_
 
    typedef  ::sensor_msgs::Image_<ContainerAllocator>  _accompanying_frame_type;
   _accompanying_frame_type accompanying_frame;
+
+   typedef std::vector< ::std_msgs::Int64_<ContainerAllocator> , typename std::allocator_traits<ContainerAllocator>::template rebind_alloc< ::std_msgs::Int64_<ContainerAllocator> >> _bounding_box_type;
+  _bounding_box_type bounding_box;
 
    typedef  ::hr_msgs::Person_<ContainerAllocator>  _target_person_type;
   _target_person_type target_person;
@@ -73,6 +79,7 @@ template<typename ContainerAllocator1, typename ContainerAllocator2>
 bool operator==(const ::grace_attn_msgs::TrackingReIDResult_<ContainerAllocator1> & lhs, const ::grace_attn_msgs::TrackingReIDResult_<ContainerAllocator2> & rhs)
 {
   return lhs.accompanying_frame == rhs.accompanying_frame &&
+    lhs.bounding_box == rhs.bounding_box &&
     lhs.target_person == rhs.target_person;
 }
 
@@ -130,12 +137,12 @@ struct MD5Sum< ::grace_attn_msgs::TrackingReIDResult_<ContainerAllocator> >
 {
   static const char* value()
   {
-    return "23bd691bb2b76cf204aca0c66b104aa1";
+    return "26b9b313443164cd67c804c21e7d603c";
   }
 
   static const char* value(const ::grace_attn_msgs::TrackingReIDResult_<ContainerAllocator>&) { return value(); }
-  static const uint64_t static_value1 = 0x23bd691bb2b76cf2ULL;
-  static const uint64_t static_value2 = 0x04aca0c66b104aa1ULL;
+  static const uint64_t static_value1 = 0x26b9b313443164cdULL;
+  static const uint64_t static_value2 = 0x67c804c21e7d603cULL;
 };
 
 template<class ContainerAllocator>
@@ -155,6 +162,7 @@ struct Definition< ::grace_attn_msgs::TrackingReIDResult_<ContainerAllocator> >
   static const char* value()
   {
     return "sensor_msgs/Image accompanying_frame\n"
+"std_msgs/Int64[] bounding_box #[width_1,height_1,width_2,height_2]\n"
 "hr_msgs/Person target_person\n"
 "================================================================================\n"
 "MSG: sensor_msgs/Image\n"
@@ -202,6 +210,9 @@ struct Definition< ::grace_attn_msgs::TrackingReIDResult_<ContainerAllocator> >
 "#Frame this data is associated with\n"
 "string frame_id\n"
 "\n"
+"================================================================================\n"
+"MSG: std_msgs/Int64\n"
+"int64 data\n"
 "================================================================================\n"
 "MSG: hr_msgs/Person\n"
 "std_msgs/Header header\n"
@@ -309,6 +320,7 @@ namespace serialization
     template<typename Stream, typename T> inline static void allInOne(Stream& stream, T m)
     {
       stream.next(m.accompanying_frame);
+      stream.next(m.bounding_box);
       stream.next(m.target_person);
     }
 
@@ -331,6 +343,14 @@ struct Printer< ::grace_attn_msgs::TrackingReIDResult_<ContainerAllocator> >
     s << indent << "accompanying_frame: ";
     s << std::endl;
     Printer< ::sensor_msgs::Image_<ContainerAllocator> >::stream(s, indent + "  ", v.accompanying_frame);
+    s << indent << "bounding_box[]" << std::endl;
+    for (size_t i = 0; i < v.bounding_box.size(); ++i)
+    {
+      s << indent << "  bounding_box[" << i << "]: ";
+      s << std::endl;
+      s << indent;
+      Printer< ::std_msgs::Int64_<ContainerAllocator> >::stream(s, indent + "    ", v.bounding_box[i]);
+    }
     s << indent << "target_person: ";
     s << std::endl;
     Printer< ::hr_msgs::Person_<ContainerAllocator> >::stream(s, indent + "  ", v.target_person);

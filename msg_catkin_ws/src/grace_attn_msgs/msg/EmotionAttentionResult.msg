@@ -1,0 +1,3 @@
+std_msgs/Int64 attention
+std_msgs/Int64 emotion
+sensor_msgs/Image visualization_frame
