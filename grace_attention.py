@@ -18,6 +18,7 @@ import cv2
 from copy import deepcopy
 from .Yolov5_StrongSORT_OSNet import grace_track
 from .Yolov5_StrongSORT_OSNet.yolov5.utils.loggers import LOGGER
+import grace_attn_msgs.msg
 import os
 
 POSE_CHAIN = [
@@ -82,8 +83,9 @@ class GraceAttention:
 	# people_debug_bag = None
 	tracker_polling_rate = 10#Hz
 	inerested_source_idx = 0#Assume we only use source 0
-	target_person_topic = "/grace_proj/target_person"
-	target_img_topic = "/grace_proj/target_img"
+
+	#For further processing the tracking result 
+	tracking_reid_result_topic = "/grace_proj/tracking_reid_output"
 	no_target_string = "None"
 
 	#Aversion
@@ -134,9 +136,9 @@ class GraceAttention:
 		# rospy.Subscriber(self.hr_img_topic, sensor_msgs.msg.Image,self.__chestCamRGBImgCallback, queue_size=self.topic_queue_size)
 		self.hr_people_pub = rospy.Publisher(self.hr_people_perception_topic, hr_msgs.msg.People, queue_size=self.topic_queue_size)
 		self.hr_face_target_pub = rospy.Publisher(self.hr_face_target_topic, hr_msgs.msg.Target, queue_size=self.topic_queue_size)
-		self.target_person_pub = rospy.Publisher(self.target_person_topic, hr_msgs.msg.Person, queue_size=self.topic_queue_size)
-		self.accompanying_frame_pub = rospy.Publisher(self.target_img_topic, sensor_msgs.msg.Image, queue_size=self.topic_queue_size)
 		self.hr_head_gesture_pub = rospy.Publisher(self.hr_head_gesture_topic, hr_msgs.msg.SetAnimation, queue_size=self.topic_queue_size)
+		self.tracking_reid_output_pub = rospy.Publisher(self.tracking_reid_result_topic, grace_attn_msgs.msg.TrackingReIDResult, queue_size=self.topic_queue_size)
+		
 
 		self.stop_pub = rospy.Publisher(self.stop_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
 		self.toggle_attention_pub = rospy.Publisher(self.toggle_attention_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
@@ -585,14 +587,19 @@ class GraceAttention:
 		#Publish relevant information for the upcoming expression and gaze detection
 		#Image frame used
 		img_used = self.cv_bridge.cv2_to_imgmsg(raw_frames[self.inerested_source_idx])
-		self.accompanying_frame_pub.publish(img_used)
 		#People msg
 		target_person_msg = hr_msgs.msg.Person()
 		if(self.target_person_msg is None):
 			target_person_msg.id = self.no_target_string
 		else:
 			target_person_msg = deepcopy(self.target_person_msg)
-		self.target_person_pub.publish(target_person_msg)
+		#Comebine them into our custom message type
+		tracking_reid_msg_to_pub = grace_attn_msgs.msg.TrackingReIDResult()
+		tracking_reid_msg_to_pub.accompanying_frame = img_used
+		tracking_reid_msg_to_pub.target_person = target_person_msg
+		#Publish for further processing
+		self.tracking_reid_output_pub.publish(tracking_reid_msg_to_pub)
+
 
 		if(self.attention_vis):
 			#Visualize the annotated frame in gui
