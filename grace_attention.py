@@ -18,6 +18,7 @@ import cv2
 from copy import deepcopy
 from .Yolov5_StrongSORT_OSNet import grace_track
 from .Yolov5_StrongSORT_OSNet.yolov5.utils.loggers import LOGGER
+from MOS_HSEmotion import grace_emotion_attention
 import os
 
 POSE_CHAIN = [
@@ -118,6 +119,15 @@ class GraceAttention:
 	pend_nod_text = "Next nod in "
 	no_nod_text = "Nodding disabled."
 
+	#######################
+	# TK
+	#######################
+	# Facial Emotion & Attention
+	emotion_attention_target_person_input_topic = "/grace_proj/target_person"
+	emotion_attention_accompanying_frame_input_topic = "/grace_proj/target_img"
+	emotion_attention_annotated_frame_output_topic = "/grace_proj/emotion_attention_annotated_frame_output_topic"
+	emotion_attention_target_person_output_topic = "/grace_proj/emotion_attention_target_person_output_topic"
+
 	#Miscellaneous	
 	main_thread  = None
 	main_thread_rate = 2 #Hz
@@ -172,6 +182,25 @@ class GraceAttention:
 			[self.hr_img_topic],
 			"0")
 
+		#######################
+		# TK
+		#######################
+		self.grace_emotion_attention_modules_pipepline = grace_emotion_attention.Pipeline()
+		self.emotion_attention_target_person_sub = rospy.Subscriber(self.emotion_attention_target_person_input_topic, 
+																	hr_msgs.msg.Person, 
+																	self.__emotionAttentionTargetPersonMsgCallback, 
+																	queue_size=self.topic_queue_size)
+		self.emotion_attention_accompanying_frame_sub = rospy.Subscriber(self.emotion_attention_accompanying_frame_input_topic, 
+																		 sensor_msgs.msg.Image,
+																		 self.__emotionAttentionAccompanyingFrameMsgCallback, 
+																		 queue_size=self.topic_queue_size)
+		self.emotion_attention_annotated_frame_pub = rospy.Publisher(self.emotion_attention_annotated_frame_output_topic, 
+																	 sensor_msgs.msg.Image, 
+																	 queue_size=self.topic_queue_size)
+		self.emotion_attention_target_person_pub = rospy.Publisher(self.emotion_attention_target_person_output_topic, 
+																   hr_msgs.msg.Person, 
+																   queue_size=self.topic_queue_size)
+
 	def __mainThread(self):
 		rate = rospy.Rate(self.main_thread_rate)
 		while(True):
@@ -189,9 +218,15 @@ class GraceAttention:
 		#Start tracking thread (note that without registering a query image no actual re-indentification would be performed)
 		self.grace_tracker.startTracking(self.tracker_polling_rate, False, annotate)#Visualize at attention module level
 
+		#######################
+		# TK
+		#######################
+		#Start the emotion and attention thread
+		self.grace_emotion_attention_thread = threading.Thread(target= self.__emotionAttentionThread, daemon= False)
+		self.grace_emotion_attention.start()
 
 		#Start the gaze aversion thread
-		self.grace_aversion_thread = threading.Thread(target = self.__aversionThread,daemon = False)
+		self.grace_aversion_thread = threading.Thread(target = self.__aversionThread, daemon = False)
 		self.grace_aversion_thread.start()
 
 		#Start the nodding thread
@@ -502,6 +537,20 @@ class GraceAttention:
 					print(e)
 			
 			rate.sleep()
+
+	##############
+	# TK
+	##############
+	def __emotionAttentionThread(self):
+		while(True):
+			target_person_msg = hr_msgs.msg.Person()
+			if target_person_msg.id == self.no_target_string:
+				time.sleep(1)
+			else:
+	
+	def __emotionAttentionTargetPersonMsgCallback(self, msg):
+
+				
 
 	def __setupNoddingTime(self, ref_time):
 		#A minimal interval between two nodding

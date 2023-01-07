@@ -1,0 +1,19 @@
+# TODO: Update with exact module version
+numpy
+#torch==1.7
+opencv_python
+scikit-image
+tqdm
+#torchvision
+Pillow
+thop
+ninja
+tensorboard
+imageio-ffmpeg
+pyyaml
+easydict
+IPython
+hsemotion
+hsemotion-onnx
+onnxruntime-gpu
+roslibpy
