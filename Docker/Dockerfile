@@ -42,10 +42,9 @@ RUN  apt update && \
 
 #Clone the main code
 RUN cd /home/ && mkdir HKUST_GRACE && cd HKUST_GRACE && \
-    git clone --recurse-submodules -j8  https://github.com/HKUST-NISL/Grace_Project.git
-
+    git clone --recurse-submodules -j8  https://github.com/HKUST-NISL/Grace_Project.git && \
 #ROS env: custom messages & general packages
-RUN apt update && \
+    apt update && \
     cd /home/HKUST_GRACE/Grace_Project/Grace_Proj_Msgs/package && \
     dpkg -i head-noetic-hr_msgs_0.3.21_amd64.deb && \ 
     dpkg -i head-noetic-grace_attn_msgs_20230108113509_amd64.deb && \
