@@ -51,6 +51,11 @@ RUN cd /home/HKUST_GRACE/Grace_Project/Grace_Proj_Msgs/package && \
     apt-get install -y ros-noetic-cv-bridge
 
 #Python env: packages needed by the tracking and re-id
+RUN pip3 insall pyyaml && \
+    pip3 install rospkg && \
+    pip3 install pycryptodomex && \
+    pip3 install pip3 install gnupg && \
+    
 
 
 ##########################################
