@@ -109,17 +109,19 @@ class GraceAttention:
 
 	#Nodding
 	toggle_nodding_topic = "/grace_proj/toggle_nodding"
-	nodding_text_topic = "/grace_proj/nodding_text"
-	nodding_enabled = False
+	# # Deprecated: now nodding is controlled directly by the dialogue system
+	# nodding_text_topic = "/grace_proj/nodding_text"
+	# nodding_enabled = False
 	hr_head_gesture_topic = "/hr/animation/set_animation"
 	hr_nod_type_string = "nod_Short"
 	hr_nod_variants_range = [1,7] #8 and 9 use lower case "s" in SHORT
 	hr_nod_magnitude_range = [0.25,1.0]
-	nodding_mean_interval = 12#Seconds
-	nodding_minimal_interval = 3.0#Seconds
-	noding_thread_rate = 5#Hz
-	pend_nod_text = "Next nod in "
-	no_nod_text = "Nodding disabled."
+	# #Deprecated: now nodding is controlled directly by the dialogue system
+	# nodding_mean_interval = 12#Seconds
+	# nodding_minimal_interval = 3.0#Seconds
+	# noding_thread_rate = 5#Hz
+	# pend_nod_text = "Next nod in "
+	# no_nod_text = "Nodding disabled."
 
 	#Miscellaneous	
 	main_thread  = None
@@ -144,8 +146,9 @@ class GraceAttention:
 		self.toggle_attention_pub = rospy.Publisher(self.toggle_attention_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
 		self.toggle_aversion_pub = rospy.Publisher(self.toggle_aversion_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
 		self.aversion_text_pub = rospy.Publisher(self.aversion_text_topic, std_msgs.msg.String, queue_size=self.topic_queue_size)
-		self.toggle_nodding_pub = rospy.Publisher(self.toggle_nodding_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
-		self.nodding_text_pub = rospy.Publisher(self.nodding_text_topic, std_msgs.msg.String, queue_size=self.topic_queue_size)
+		# #Deprecated: now nodding is controlled directly by the dialogue system
+		# self.toggle_nodding_pub = rospy.Publisher(self.toggle_nodding_topic, std_msgs.msg.Bool, queue_size=self.topic_queue_size)
+		# self.nodding_text_pub = rospy.Publisher(self.nodding_text_topic, std_msgs.msg.String, queue_size=self.topic_queue_size)
 		self.attention_target_img_pub = rospy.Publisher(self.attention_target_img_topic, sensor_msgs.msg.Image, queue_size=self.topic_queue_size)
 		self.annotated_tracking_stream_pub = rospy.Publisher(self.annotated_tracking_stream_topic, sensor_msgs.msg.Image, queue_size=self.topic_queue_size)
 
@@ -196,9 +199,10 @@ class GraceAttention:
 		self.grace_aversion_thread = threading.Thread(target = self.__aversionThread,daemon = False)
 		self.grace_aversion_thread.start()
 
-		#Start the nodding thread
-		self.grace_nodding_thread = threading.Thread(target= self.__noddingThread, daemon= False)
-		self.grace_nodding_thread.start()
+		# #Deprecated: now nodding is controlled directly by the dialogue system
+		# #Start the nodding thread
+		# self.grace_nodding_thread = threading.Thread(target= self.__noddingThread, daemon= False)
+		# self.grace_nodding_thread.start()
 
 		#Start main thread
 		self.__mainThread()
@@ -213,8 +217,9 @@ class GraceAttention:
 			self.toggle_attention_pub.publish(std_msgs.msg.Bool(False))
 			#Stop aversion
 			self.toggle_aversion_pub.publish(std_msgs.msg.Bool(False))
-			#Stop nodding
-			self.toggle_nodding_pub.publish(std_msgs.msg.Bool(False))
+			# #Deprecated: now nodding is controlled directly by the dialogue system
+			# #Stop nodding
+			# self.toggle_nodding_pub.publish(std_msgs.msg.Bool(False))
 			LOGGER.info("[Grace Attention] all attention-related things stopped.")
 		except Exception as e:
 			LOGGER.error(e)
@@ -237,7 +242,8 @@ class GraceAttention:
 
 			#Attention preempt the aversion and nodding
 			self.toggle_aversion_pub.publish(std_msgs.msg.Bool(self.attention_enabled and self.aversion_enabled))
-			self.toggle_nodding_pub.publish(std_msgs.msg.Bool(self.attention_enabled and self.nodding_enabled))
+			# #Deprecated: now nodding is controlled directly by the dialogue system
+			# self.toggle_nodding_pub.publish(std_msgs.msg.Bool(self.attention_enabled and self.nodding_enabled))
 
 			LOGGER.info("Grace attention flag set to %s." % (enabled))
 		except Exception as e:
@@ -261,16 +267,69 @@ class GraceAttention:
 		self.__toggleAversion(self.attention_enabled and msg.data)
 
 	def __toggleNodding(self, enabled):
-		self.nodding_enabled = enabled
-		if(self.nodding_enabled):
-			self.__setupNoddingTime(time.time())
-			LOGGER.info("Nodding Enabled.")
-		else:
-			LOGGER.info("Nodding Disabled.")
+		if(enabled):
+			#do nogging once
+			self.__nodOnce()
+			LOGGER.info("Nodding")
+
+		#Deprecated: now nodding is controlled directly by the dialogue system
+		# self.nodding_enabled = enabled
+		# if(self.nodding_enabled):
+		# 	self.__setupNoddingTime(time.time())
+		# 	LOGGER.info("Nodding Enabled.")
+		# else:
+		# 	LOGGER.info("Nodding Disabled.")
 
 	def __toggleNoddingMsgCallback(self, msg):
 		#Nodding is a sub function of attention
 		self.__toggleNodding(self.attention_enabled and msg.data)
+
+	def __nodOnce(self):
+		#Compose and publish a nodding command
+		nodding_gesture_cmd = hr_msgs.msg.SetAnimation()
+		nodding_gesture_cmd.name = self.hr_nod_type_string + str(numpy.random.randint(self.hr_nod_variants_range[0],self.hr_nod_variants_range[1]+1))
+		nodding_gesture_cmd.repeat = 1
+		nodding_gesture_cmd.speed = 1.0
+		nodding_gesture_cmd.magnitude = numpy.random.uniform(self.hr_nod_magnitude_range[0],self.hr_nod_magnitude_range[1])
+		self.hr_head_gesture_pub.publish(nodding_gesture_cmd)
+
+	# Deprecated: now nodding is controlled directly by the dialogue system
+	# def __noddingThread(self):
+	# 	rate = rospy.Rate(self.noding_thread_rate)
+	# 	while(True):
+	# 		if(self.nodding_enabled):
+	# 			t = time.time()
+	# 			#Do nodding
+	# 			if(t>= self.nodding_time):
+	# 				self.__nodOnce()
+
+	# 				#Setup the next nodding time
+	# 				self.__setupNoddingTime(t)
+	# 			else:
+	# 				try:
+	# 					nodding_state_text_msg = std_msgs.msg.String(self.pend_nod_text + f"{max(0,self.nodding_time - t):.2f}")
+	# 					self.nodding_text_pub.publish(nodding_state_text_msg)
+	# 				except Exception as e:
+	# 					print(e)
+	# 		else:
+	# 			try:
+	# 				text = ''
+	# 				if(self.attention_enabled):
+	# 					text = self.no_nod_text
+	# 				else:
+	# 					text = 'Attention Disabled'
+	# 				nodding_state_text_msg = std_msgs.msg.String(text)
+	# 				self.nodding_text_pub.publish(nodding_state_text_msg)
+	# 			except Exception as e:
+	# 				print(e)
+			
+	# 		rate.sleep()
+
+	# Deprecated: now nodding is controlled directly by the dialogue system
+	# def __setupNoddingTime(self, ref_time):
+	# 	#A minimal interval between two nodding
+	# 	self.nodding_time = ref_time + max(self.nodding_minimal_interval, numpy.random.exponential(self.nodding_mean_interval))
+
 
 	def __publishCv2ImgAsRosMsgWrapper(self,publisher,cv2_img_bgr8):
 		#Convert the image of interest into ros color format
@@ -468,47 +527,6 @@ class GraceAttention:
 			
 			self.gaze_aversion_target_msg.body.location = new_point
 
-	def __noddingThread(self):
-		rate = rospy.Rate(self.noding_thread_rate)
-		while(True):
-			if(self.nodding_enabled):
-				t = time.time()
-				#Do nodding
-				if(t>= self.nodding_time):
-					#Compose and publish a nodding command
-					nodding_gesture_cmd = hr_msgs.msg.SetAnimation()
-					nodding_gesture_cmd.name = self.hr_nod_type_string + str(numpy.random.randint(self.hr_nod_variants_range[0],self.hr_nod_variants_range[1]+1))
-					nodding_gesture_cmd.repeat = 1
-					nodding_gesture_cmd.speed = 1.0
-					nodding_gesture_cmd.magnitude = numpy.random.uniform(self.hr_nod_magnitude_range[0],self.hr_nod_magnitude_range[1])
-					self.hr_head_gesture_pub.publish(nodding_gesture_cmd)
-
-					#Setup the next nodding time
-					self.__setupNoddingTime(t)
-				else:
-					try:
-						nodding_state_text_msg = std_msgs.msg.String(self.pend_nod_text + f"{max(0,self.nodding_time - t):.2f}")
-						self.nodding_text_pub.publish(nodding_state_text_msg)
-					except Exception as e:
-						print(e)
-			else:
-				try:
-					text = ''
-					if(self.attention_enabled):
-						text = self.no_nod_text
-					else:
-						text = 'Attention Disabled'
-					nodding_state_text_msg = std_msgs.msg.String(text)
-					self.nodding_text_pub.publish(nodding_state_text_msg)
-				except Exception as e:
-					print(e)
-			
-			rate.sleep()
-
-	def __setupNoddingTime(self, ref_time):
-		#A minimal interval between two nodding
-		self.nodding_time = ref_time + max(self.nodding_minimal_interval, numpy.random.exponential(self.nodding_mean_interval))
-
 	def __writeBag(self):
 		self.people_debug_bag.close()
 		self.people_debug_bag = None
@@ -528,7 +546,7 @@ class GraceAttention:
 		annotated_frames):		
 		#For now we assume only one of the sources are of interest
 		
-		print(is_target_tracked)
+		# print(is_target_tracked)
 
 		if(
 			self.attention_enabled
@@ -614,7 +632,6 @@ class GraceAttention:
 
 		#Publish for further processing
 		self.tracking_reid_output_pub.publish(tracking_reid_msg_to_pub)
-
 
 		if(self.attention_vis):
 			#Visualize the annotated frame in gui
