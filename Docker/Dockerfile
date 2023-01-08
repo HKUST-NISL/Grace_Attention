@@ -48,7 +48,7 @@ RUN cd /home/ && mkdir HKUST_GRACE && cd HKUST_GRACE && \
 RUN apt update && \
     cd /home/HKUST_GRACE/Grace_Project/Grace_Proj_Msgs/package && \
     dpkg -i head-noetic-hr_msgs_0.3.21_amd64.deb && \ 
-    dpkg -i head-noetic-grace_attn_msgs_20230107181551_amd64.deb && \
+    dpkg -i head-noetic-grace_attn_msgs_20230108113509_amd64.deb && \
     apt-get install -y ros-noetic-cv-bridge
 
 #Python env: packages needed by the tracking and re-id
