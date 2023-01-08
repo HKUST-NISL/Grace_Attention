@@ -21,7 +21,7 @@ RUN sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main"
     curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | apt-key add - 
 
 RUN apt update && \ 
-    apt install -y ros-noetic-ros-base 
+    apt install -y ros-noetic-desktop-full
 
 RUN echo "source /opt/ros/noetic/setup.bash" >> /home/.bashrc && \ 
     apt install -y python3-rosdep python3-rosinstall python3-rosinstall-generator python3-wstool build-essential && \
@@ -55,7 +55,7 @@ RUN pip3 insall pyyaml && \
     pip3 install rospkg && \
     pip3 install pycryptodomex && \
     pip3 install pip3 install gnupg && \
-    
+
 
 
 ##########################################
